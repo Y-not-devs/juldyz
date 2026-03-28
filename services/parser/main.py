@@ -7,6 +7,10 @@ from pydantic import BaseModel, HttpUrl
 from services.parser.celery_app import celery_app
 from services.parser.storage import setup_user_directories
 from services.parser.tasks import parse_file_task, parse_github_task
+from services.parser.validation import (
+    ensure_safe_identifier,
+    extract_github_username,
+)
 
 app = FastAPI()
 
@@ -25,7 +29,26 @@ async def start_parsing(request: ParseRequest):
             detail="Provide file_id and/or github_url",
         )
 
-    dirs = setup_user_directories(request.user_id)
+    try:
+        user_id = ensure_safe_identifier(request.user_id, "user_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    file_id: Optional[str] = None
+    if request.file_id:
+        try:
+            file_id = ensure_safe_identifier(request.file_id, "file_id")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    github_username: Optional[str] = None
+    if request.github_url:
+        try:
+            github_username = extract_github_username(str(request.github_url))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    dirs = setup_user_directories(user_id)
     files_dir = dirs["files"]
 
     task_ids: dict[str, Optional[str]] = {
@@ -33,30 +56,31 @@ async def start_parsing(request: ParseRequest):
         "file_task_id": None,
     }
 
-    if request.file_id:
-        pdf_path = files_dir / f"{request.file_id}.pdf"
+    if file_id:
+        pdf_path = files_dir / f"{file_id}.pdf"
         if not pdf_path.exists():
             raise HTTPException(
                 status_code=404,
-                detail=f"File {request.file_id}.pdf not found in data/files",
+                detail=f"File {file_id}.pdf not found in data/files",
             )
 
-    if request.github_url:
+    if github_username:
         github_async_result = parse_github_task.delay(
-            request.user_id,
-            str(request.github_url),
+            user_id,
+            github_username,
         )
         task_ids["github_task_id"] = github_async_result.id
 
-    if request.file_id:
-        file_async_result = parse_file_task.delay(request.user_id, request.file_id)
+    if file_id:
+        file_async_result = parse_file_task.delay(user_id, file_id)
         task_ids["file_task_id"] = file_async_result.id
 
     return {
         "status": "queued",
-        "user_id": request.user_id,
-        "file_id": request.file_id,
+        "user_id": user_id,
+        "file_id": file_id,
         "github_url": str(request.github_url) if request.github_url else None,
+        "github_username": github_username,
         **task_ids,
     }
 

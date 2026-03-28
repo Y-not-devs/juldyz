@@ -24,12 +24,25 @@ command for run parser-service with docker(with redis)
     - `user_id` (required)
     - `file_id` (optional)
     - `github_url` (optional)
+  - `user_id`/`file_id` allow only `[A-Za-z0-9_-]`.
+  - `github_url` must be a GitHub profile URL (`https://github.com/<username>`).
   - At least one of `file_id` or `github_url` must be provided.
   - Response includes `github_task_id` and/or `file_task_id`.
 - `GET /parse/tasks/{task_id}`
   - Returns Celery status: `PENDING`, `STARTED`, `SUCCESS`, `FAILURE`.
   - On `SUCCESS` includes `result`.
   - On `FAILURE` includes `error`.
+
+## File Parsing Output
+- `parse_file_task` reads PDF pages and extracts text with `pypdf`.
+- Result file is written to `data/users/<user_id>/processed/processed_<file_id>.json`.
+- Output contains:
+  - `status: parsed`
+  - `source_pdf`
+  - `pdf.summary` (page counts, empty/failed pages, total chars)
+  - `pdf.metadata` (document metadata when available)
+  - `pdf.pages` (per-page extracted text)
+  - `extracted_profile` (heuristic fields: name, email, phone, links, skills)
 
 ## Retry / Rate Limit Handling
 - GitHub fetch uses `tenacity`.
@@ -81,5 +94,4 @@ If you want to remove Redis persisted volume too:
 
 ## Notes For Next Developer
 - Parser output is still file-based JSON in `data/users/<user_id>/...`.
-- `parse_file_task` currently writes a placeholder payload (`pending_llm_integration`).
-- When real PDF parsing is added, keep it inside Celery tasks, not in FastAPI handlers.
+- Keep heavy parsing logic inside Celery tasks, not in FastAPI handlers.
