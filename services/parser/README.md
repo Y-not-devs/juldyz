@@ -38,7 +38,9 @@ command for run parser-service with docker(with redis)
   - rate-limited `403` (`X-RateLimit-Remaining=0`)
   - `5xx`
 
-## Run Locally
+## Run Locally (Legacy/Fallback Mode)
+Use this mode only if you intentionally do not run the full parser Docker stack.
+
 1. Install parser dependencies:
    - `pip install -r services/parser/requirements.txt`
 2. Install Docker Desktop and make sure daemon is running.
@@ -47,7 +49,7 @@ command for run parser-service with docker(with redis)
 4. Start worker:
    - `bash scripts/run_parser_worker.sh`
 
-## Run With Docker (Recommended)
+## Run With Docker (Recommended / Main Mode)
 This mode starts only parser components (`parser-api`, `parser-worker`, `parser-redis`).
 
 1. Build and start:
