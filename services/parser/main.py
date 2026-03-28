@@ -1,5 +1,8 @@
 from typing import Optional
 
+from core.logging import setup_logging
+setup_logging("parser")
+
 from celery.result import AsyncResult
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
