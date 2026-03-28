@@ -73,5 +73,4 @@ docker-compose.override.yml
 # =========================
 *.tmp
 *.swp
-data/juldyz.db-wal
-data/juldyz.db-shm
+/data
