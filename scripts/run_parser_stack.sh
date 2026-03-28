@@ -5,10 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/parser_common.sh"
+docker compose -f docker-compose.parser.yml up --build -d
+docker compose -f docker-compose.parser.yml ps
 
-load_parser_env
-ensure_parser_redis
-
-python -m services.parser.main
