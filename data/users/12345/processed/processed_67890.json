@@ -1,4 +1,6 @@
 {
     "status": "pending_llm_integration",
-    "file_id": "67890"
+    "file_id": "67890",
+    "source_pdf": "/app/data/files/67890.pdf",
+    "updated_at": "2026-03-28T21:22:53.565434+00:00"
 }
