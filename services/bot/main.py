@@ -22,10 +22,18 @@ api = FastAPI(title="bot-service")
 
 @dp.message(CommandStart())
 async def start(message: Message):
-    tg_id     = str(message.from_user.id)
-    full_name = message.from_user.full_name
+    tg_id = str(message.from_user.id)
 
-    candidate_id = db.upsert_candidate(tg_id=tg_id, full_name=full_name)
+    db.upsert_user(telegram_id=tg_id)
+    db.upsert_telegram_user(
+        telegram_id=tg_id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name,
+        language_code=message.from_user.language_code,
+        is_bot=message.from_user.is_bot,
+        raw=message.from_user.model_dump()
+    )
 
     form_link = f"{FORM_URL}?entry.TG_ID_FIELD={tg_id}"
 
@@ -34,14 +42,14 @@ async def start(message: Message):
     ]])
 
     await message.answer(
-        f"Привет, {full_name}! 👋\n\n"
+        f"Привет, {message.from_user.first_name}! 👋\n\n"
         f"Это система отбора кандидатов inVision U.\n\n"
         f"Нажми кнопку ниже чтобы заполнить анкету.\n"
         f"После отправки я пришлю подтверждение.",
         reply_markup=kb
     )
 
-    print(f"[BOT] /start tg_id={tg_id} candidate_id={candidate_id}")
+    print(f"[BOT] /start tg_id={tg_id}")
 
 
 # --- Internal API (called by form-service) ---
