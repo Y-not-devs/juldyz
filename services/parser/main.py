@@ -1,6 +1,6 @@
 from typing import Optional
 
-from core.logging import setup_logging
+from core.logger import setup_logging
 setup_logging("parser")
 
 from celery.result import AsyncResult
