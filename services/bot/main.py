@@ -10,13 +10,16 @@ from aiogram.filters import CommandStart
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from core.config import TELEGRAM_TOKEN, FORM_URL
+from core.config import TELEGRAM_TOKEN, FORM_URL, TG_ID_FIELD
 from core.db import db
 print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={FORM_URL}")
 bot = Bot(token=str(TELEGRAM_TOKEN))
 dp  = Dispatcher()
 api = FastAPI(title="bot-service")
 
+
+def generate_form_link(tg_id: str) -> str:
+    return f"{FORM_URL}?usp=pp_url&entry.{TG_ID_FIELD}={tg_id}"
 
 # --- Telegram handlers ---
 
@@ -35,7 +38,7 @@ async def start(message: Message):
         raw=message.from_user.model_dump()
     )
 
-    form_link = f"{FORM_URL}?entry.TG_ID_FIELD={tg_id}"
+    form_link = generate_form_link(tg_id)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="📋 Заполнить анкету", url=form_link)

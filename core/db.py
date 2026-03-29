@@ -101,7 +101,6 @@ class Database:
             """)
 
     # --- users ---
-
     def upsert_user(self, telegram_id: str) -> int:
         with self._connect() as conn:
             row = conn.execute(
@@ -121,8 +120,11 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
-    # --- telegram_users ---
+    # --- adapter for form ---
+    def get_candidate_by_tg(self, telegram_id: str) -> dict | None:
+        return self.get_user_by_tg(telegram_id)
 
+    # --- telegram_users ---
     def upsert_telegram_user(self, telegram_id: str, username: str = None,
                               first_name: str = None, last_name: str = None,
                               language_code: str = None, is_bot: bool = False,
@@ -146,7 +148,6 @@ class Database:
             ))
 
     # --- candidate_responses ---
-
     def save_candidate_response(self, user_id: int, payload: dict) -> int:
         fields = [
             "email", "last_name", "first_name", "patronymic", "dob",
@@ -181,7 +182,6 @@ class Database:
         return dict(row) if row else None
 
     # --- user_files ---
-
     def save_file(self, user_id: int, file_id: str, file_type: str) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -199,7 +199,6 @@ class Database:
         return [dict(r) for r in rows]
 
     # --- user_links ---
-
     def save_link(self, user_id: int, link_url: str, linked_file_id: int = None) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -224,7 +223,6 @@ class Database:
         return [dict(r) for r in rows]
 
     # --- scores ---
-
     def save_score(self, user_id: int, scores: dict, explanation: dict, ai_suspicion: str):
         with self._connect() as conn:
             conn.execute("""

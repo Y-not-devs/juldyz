@@ -1,30 +1,34 @@
-from core.logger import setup_logging
-setup_logging("form")
-
+import asyncio
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import uvicorn
 
 from core.db import db
 from core.config import BOT_SERVICE_URL
+from core.logger import setup_logging
 
-app = FastAPI(title="form-service")
+setup_logging("form")
 
+api = FastAPI(title="form-service")
 
-@app.post("/form-submit")
+@api.post("/form-submit")
 async def form_submit(request: Request):
     payload = await request.json()
+
+    # log full payload
+    print(f"[FORM] received payload: {payload}")
 
     tg_id = str(payload.get("tg_id", "")).strip()
     if not tg_id:
         return JSONResponse({"status": "error", "detail": "no tg_id"}, status_code=400)
 
-    candidate = db.get_candidate_by_tg(tg_id)
+    candidate = db.get_user_by_tg(tg_id)
     if not candidate:
         return JSONResponse({"status": "error", "detail": "candidate not found, start bot first"}, status_code=404)
 
     candidate_id = candidate["id"]
-    db.set_form_data(candidate_id, payload)
+    db.save_candidate_response(candidate_id, payload)
 
     # notify bot
     try:
@@ -39,7 +43,17 @@ async def form_submit(request: Request):
     print(f"[FORM] candidate_id={candidate_id} tg_id={tg_id} form saved")
     return JSONResponse({"status": "ok", "candidate_id": candidate_id})
 
-
-@app.get("/health")
+@api.get("/health")
 def health():
     return {"status": "ok", "service": "form"}
+
+# --- Entry point ---
+async def main():
+    config = uvicorn.Config(api, host="0.0.0.0", port=8001, log_level="info")
+    server = uvicorn.Server(config)
+    
+    print("[FORM] starting api on :8001")
+    await server.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
