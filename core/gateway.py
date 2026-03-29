@@ -3,12 +3,16 @@ import time
 import signal
 import subprocess
 import asyncio
+import os
 from pathlib import Path
+from contextlib import asynccontextmanager
 
-from core.logger import setup_logging
+from logger import setup_logging
 setup_logging("gateway")
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# --- path setup ---
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
 
 import httpx
 import uvicorn
@@ -18,7 +22,10 @@ from fastapi.responses import JSONResponse
 from core.hub import hub
 from core.db import db
 
-ROOT = Path(__file__).parent.parent
+
+# =====================================================
+# SERVICES CONFIG
+# =====================================================
 
 SERVICES = {
     "form":    {"script": "services/form/main.py",    "port": 8001},
@@ -29,22 +36,27 @@ SERVICES = {
 
 _processes: dict[str, subprocess.Popen] = {}
 
-app = FastAPI(title="juldyz-gateway")
 
-
-# --- lifecycle ---
+# =====================================================
+# SERVICE CONTROL
+# =====================================================
 
 def start_services():
     for name, cfg in SERVICES.items():
         script = ROOT / cfg["script"]
+
         if not script.exists():
             print(f"[GATEWAY] skip {name} — {script} not found")
             continue
+
         print(f"[GATEWAY] starting {name} on :{cfg['port']}")
+
         proc = subprocess.Popen(
             [sys.executable, str(script)],
-            cwd=str(ROOT)
+            cwd=str(ROOT),
+            env={**os.environ, "PYTHONPATH": str(ROOT)},
         )
+
         _processes[name] = proc
         time.sleep(0.5)
 
@@ -68,21 +80,47 @@ signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
 
 
-@app.on_event("startup")
-async def startup():
+# =====================================================
+# FASTAPI LIFESPAN (NEW WAY)
+# =====================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    # ----- startup -----
     db._init()
     print("[GATEWAY] db initialized")
+
     start_services()
     await asyncio.sleep(2)
+
     print(f"[GATEWAY] ready — services: {list(_processes.keys())}")
 
+    yield
 
-# --- health ---
+    # ----- shutdown -----
+    stop_services()
+
+
+# =====================================================
+# APP INIT
+# =====================================================
+
+app = FastAPI(
+    title="juldyz-gateway",
+    lifespan=lifespan,
+)
+
+
+# =====================================================
+# HEALTH
+# =====================================================
 
 @app.get("/health")
 async def health():
     registered = hub.all()
     results = {}
+
     async with httpx.AsyncClient() as client:
         for name, info in registered.items():
             url = f"http://localhost:{info['port']}/health"
@@ -91,6 +129,7 @@ async def health():
                 results[name] = r.json()
             except Exception:
                 results[name] = {"status": "unreachable"}
+
     return {"gateway": "ok", "services": results}
 
 
@@ -99,49 +138,75 @@ def services():
     return hub.all()
 
 
-# --- proxy ---
+# =====================================================
+# INTERNAL PROXY
+# =====================================================
 
 async def _proxy(service: str, path: str, request: Request):
     url = hub.locate(service)
+
     if not url:
         return JSONResponse(
-            {"error": f"service '{service}' not registered in hub"},
-            status_code=503
+            {"error": f"service '{service}' not registered"},
+            status_code=503,
         )
+
     body = await request.body()
+
     async with httpx.AsyncClient() as client:
         r = await client.request(
             method=request.method,
             url=f"{url}{path}",
             content=body,
-            headers={"Content-Type": request.headers.get("Content-Type", "application/json")},
-            timeout=10
+            headers={
+                "Content-Type": request.headers.get(
+                    "Content-Type",
+                    "application/json",
+                )
+            },
+            timeout=10,
         )
+
     return JSONResponse(status_code=r.status_code, content=r.json())
 
 
-# --- routes ---
+# =====================================================
+# ROUTES
+# =====================================================
 
 @app.post("/form-submit")
 async def route_form(request: Request):
     return await _proxy("form", "/form-submit", request)
 
+
 @app.post("/notify")
 async def route_notify(request: Request):
     return await _proxy("bot", "/notify", request)
+
 
 @app.post("/score")
 async def route_score(request: Request):
     return await _proxy("scoring", "/score", request)
 
+
 @app.post("/parse")
 async def route_parse(request: Request):
     return await _proxy("parser", "/parse", request)
+
 
 @app.get("/candidates")
 async def route_candidates(request: Request):
     return await _proxy("scoring", "/candidates", request)
 
 
+# =====================================================
+# ENTRYPOINT
+# =====================================================
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+    )
