@@ -10,16 +10,16 @@ from aiogram.filters import CommandStart
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from core.config import TELEGRAM_TOKEN, FORM_URL, TG_ID_FIELD
+from core.config import TELEGRAM_TOKEN, GOOGLE_FORM_URL, QUESTION_FIELD_ID
 from core.db import db
-print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={FORM_URL}")
+print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={GOOGLE_FORM_URL}")
 bot = Bot(token=str(TELEGRAM_TOKEN))
 dp  = Dispatcher()
 api = FastAPI(title="bot-service")
 
 
 def generate_form_link(tg_id: str) -> str:
-    return f"{FORM_URL}?usp=pp_url&entry.{TG_ID_FIELD}={tg_id}"
+    return f"{GOOGLE_FORM_URL}?usp=pp_url&entry.{QUESTION_FIELD_ID}={tg_id}"
 
 # --- Telegram handlers ---
 
