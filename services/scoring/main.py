@@ -1,10 +1,11 @@
 from core.logger import setup_logging
-setup_logging("scoring")
+from core.config import SERVICES
+setup_logging(SERVICES["scoring-service"]["prefix"])
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="scoring-service")
+app = FastAPI(title=f"{SERVICES['scoring-service']['prefix']} API")
 
 
 
