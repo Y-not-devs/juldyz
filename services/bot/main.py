@@ -1,7 +1,4 @@
 from core.logger import setup_logging
-setup_logging("bot")
-
-
 import asyncio
 import uvicorn
 from aiogram import Bot, Dispatcher
@@ -10,16 +7,19 @@ from aiogram.filters import CommandStart
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from core.config import TELEGRAM_TOKEN, FORM_URL, TG_ID_FIELD
+from core.config import TELEGRAM_TOKEN, GOOGLE_FORM_URL, QUESTION_FIELD_ID, SERVICES
 from core.db import db
-print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={FORM_URL}")
+
+setup_logging(f"SERVICES['bot-service']['prefix']")
+print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={GOOGLE_FORM_URL}")
+
 bot = Bot(token=str(TELEGRAM_TOKEN))
 dp  = Dispatcher()
-api = FastAPI(title="bot-service")
+api = FastAPI(title=f"{SERVICES['bot-service']['prefix']} API")
 
 
 def generate_form_link(tg_id: str) -> str:
-    return f"{FORM_URL}?usp=pp_url&entry.{TG_ID_FIELD}={tg_id}"
+    return f"{GOOGLE_FORM_URL}?usp=pp_url&entry.{QUESTION_FIELD_ID}={tg_id}"
 
 # --- Telegram handlers ---
 
@@ -86,10 +86,15 @@ def health():
 # --- Entry point ---
 
 async def main():
-    config = uvicorn.Config(api, host="0.0.0.0", port=8002, log_level="warning")
+    config = uvicorn.Config(
+        api, 
+        host=SERVICES['bot-service']['url'], 
+        port=SERVICES['bot-service']['port'], 
+        log_level=SERVICES['bot-service']['log_level']
+    )
     server = uvicorn.Server(config)
 
-    print("[BOT] starting polling + api on :8002")
+    print(f"[BOT] starting polling + api on :{SERVICES['bot-service']['port']}")
     await asyncio.gather(
         dp.start_polling(bot),
         server.serve()

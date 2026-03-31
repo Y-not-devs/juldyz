@@ -13,19 +13,13 @@ import uvicorn
 
 # --- logging ---
 from logger import setup_logging
+from core.config import SERVICES, GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL
+
 setup_logging("gateway")
 
 # --- path setup ---
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-
-# --- SERVICES ---
-SERVICES = {
-    "form-service":    {"script": "services/form/main.py",    "port": 8001},
-    "bot-service":     {"script": "services/bot/main.py",     "port": 8002},
-    "scoring-service": {"script": "services/scoring/main.py", "port": 8003},
-    "parser-service":  {"script": "services/parser/main.py",  "port": 8004},
-}
 
 _processes: dict[str, subprocess.Popen] = {}
 
@@ -39,11 +33,17 @@ def start_services():
             print(f"[GATEWAY] skip {name} — {script} not found")
             continue
 
-        print(f"[GATEWAY] starting {name} on :{cfg['port']}")
+        print(f"[GATEWAY] starting {name} on :{cfg['port']} with log_level={cfg['log_level']}")
         proc = subprocess.Popen(
             [sys.executable, str(script)],
             cwd=str(ROOT),
-            env={**os.environ, "PYTHONPATH": str(ROOT)},
+            env={
+                **os.environ,
+                "PYTHONPATH": str(ROOT),
+                "SERVICE_NAME": name,
+                "SERVICE_PORT": str(cfg["port"]),
+                "SERVICE_LOG_LEVEL": cfg["log_level"],
+            },
         )
         _processes[name] = proc
         time.sleep(0.5)
@@ -89,7 +89,7 @@ async def _proxy(service: str, path: str, request: Request):
     if not cfg:
         return JSONResponse({"error": f"unknown service '{service}'"}, status_code=404)
 
-    url = f"http://localhost:{cfg['port']}/{path}"
+    url = f"{cfg['url']}:{cfg['port']}/{path}"
     body = await request.body()
 
     try:
@@ -138,10 +138,16 @@ async def api_proxy(service: str, path: str, request: Request):
 # =====================================================
 @app.get("/health")
 async def health():
-    return {"gateway": "ok", "services": list(SERVICES.keys())}
+    return {
+        "gateway": "ok",
+        "services": [
+            {"name": name, "url": f"{cfg['url']}:{cfg['port']}", "log_level": cfg["log_level"]}
+            for name, cfg in SERVICES.items()
+        ],
+    }
 
 # =====================================================
 # ENTRYPOINT
 # =====================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level=LOG_LEVEL)

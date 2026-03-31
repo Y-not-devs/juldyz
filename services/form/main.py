@@ -5,12 +5,12 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from core.db import db
-from core.config import BOT_SERVICE_URL
+from core.config import SERVICES
 from core.logger import setup_logging
 
 setup_logging("form")
 
-api = FastAPI(title="form-service")
+api = FastAPI(title=f"{SERVICES['form-service']['prefix']} API")
 
 @api.post("/form-submit")
 async def form_submit(request: Request):
@@ -25,7 +25,10 @@ async def form_submit(request: Request):
 
     candidate = db.get_user_by_tg(tg_id)
     if not candidate:
-        return JSONResponse({"status": "error", "detail": "candidate not found, start bot first"}, status_code=404)
+        return JSONResponse(
+            {"status": "error", "detail": "candidate not found, start bot first"},
+            status_code=404
+            )
 
     candidate_id = candidate["id"]
     db.save_candidate_response(candidate_id, payload)
@@ -33,10 +36,14 @@ async def form_submit(request: Request):
     # notify bot
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(f"{BOT_SERVICE_URL}/notify", json={
-                "tg_id": tg_id,
-                "candidate_id": candidate_id
-            }, timeout=5)
+            await client.post(
+                f"{SERVICES['bot-service']['url']}:{SERVICES['bot-service']['port']}/notify",
+                json={
+                    "tg_id": tg_id,
+                    "candidate_id": candidate_id
+                },
+                timeout=5
+            )
     except Exception as e:
         print(f"[FORM] bot notify failed: {e}")
 
@@ -49,10 +56,15 @@ def health():
 
 # --- Entry point ---
 async def main():
-    config = uvicorn.Config(api, host="0.0.0.0", port=8001, log_level="info")
+    config = uvicorn.Config(
+        api,
+        host=SERVICES['form-service']['url'],
+        port=SERVICES['form-service']['port'],
+        log_level=SERVICES['form-service']['log_level']
+    )
     server = uvicorn.Server(config)
     
-    print("[FORM] starting api on :8001")
+    print(f"[FORM] starting api on :{SERVICES['form-service']['port']}")
     await server.serve()
 
 if __name__ == "__main__":
