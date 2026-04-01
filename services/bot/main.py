@@ -1,102 +1,52 @@
-from core.logger import setup_logging
 import asyncio
 import uvicorn
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, APIRouter
 
+from core.logger import setup_logging
 from core.config import TELEGRAM_TOKEN, GOOGLE_FORM_URL, QUESTION_FIELD_ID, SERVICES
 from core.db import db
+from services.bot.service import BotService
+from services.bot.schemas.notify import NotifyRequest
 
-setup_logging(f"SERVICES['bot-service']['prefix']")
-print(f"[BOT] loaded config: TELEGRAM_TOKEN={TELEGRAM_TOKEN} FORM_URL={GOOGLE_FORM_URL}")
+setup_logging(SERVICES['bot-service']['prefix'])
 
-bot = Bot(token=str(TELEGRAM_TOKEN))
-dp  = Dispatcher()
 api = FastAPI(title=f"{SERVICES['bot-service']['prefix']} API")
+router = APIRouter(tags=["bot-service"])
+bot_service = BotService(
+    db=db,
+    TELEGRAM_TOKEN=TELEGRAM_TOKEN,
+    GOOGLE_FORM_URL=GOOGLE_FORM_URL,
+    QUESTION_FIELD_ID=QUESTION_FIELD_ID
+)
 
+@router.post("/notify")
+async def notify(data: NotifyRequest):
+    await bot_service.notify_user(data.tg_id)
+    return {"status": "ok"}
 
-def generate_form_link(tg_id: str) -> str:
-    return f"{GOOGLE_FORM_URL}?usp=pp_url&entry.{QUESTION_FIELD_ID}={tg_id}"
-
-# --- Telegram handlers ---
-
-@dp.message(CommandStart())
-async def start(message: Message):
-    tg_id = str(message.from_user.id)
-
-    db.upsert_user(telegram_id=tg_id)
-    db.upsert_telegram_user(
-        telegram_id=tg_id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        language_code=message.from_user.language_code,
-        is_bot=message.from_user.is_bot,
-        raw=message.from_user.model_dump()
-    )
-
-    form_link = generate_form_link(tg_id)
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 Заполнить анкету", url=form_link)
-    ]])
-
-    await message.answer(
-        f"Привет, {message.from_user.first_name}! 👋\n\n"
-        f"Это система отбора кандидатов inVision U.\n\n"
-        f"Нажми кнопку ниже чтобы заполнить анкету.\n"
-        f"После отправки я пришлю подтверждение.",
-        reply_markup=kb
-    )
-
-    print(f"[BOT] /start tg_id={tg_id}")
-
-
-# --- Internal API (called by form-service) ---
-
-@api.post("/notify")
-async def notify(data: dict):
-    tg_id        = data.get("tg_id")
-    candidate_id = data.get("candidate_id")
-
-    if not tg_id:
-        return JSONResponse({"status": "error", "detail": "no tg_id"}, status_code=400)
-
-    await bot.send_message(
-        chat_id=int(tg_id),
-        text=(
-            "✅ Анкета получена!\n\n"
-            "Мы изучим твою заявку и свяжемся с тобой в ближайшее время.\n"
-            "Следи за обновлениями здесь."
-        )
-    )
-
-    print(f"[BOT] notified tg_id={tg_id} candidate_id={candidate_id}")
-    return JSONResponse({"status": "ok"})
-
-
-@api.get("/health")
-def health():
+@router.get("/health")
+async def health():
     return {"status": "ok", "service": "bot"}
 
+api.include_router(router)
+
+async def start_bot():
+    await bot_service.start_polling()
 
 # --- Entry point ---
-
 async def main():
+    cfg = SERVICES['bot-service']
     config = uvicorn.Config(
-        api, 
-        host=SERVICES['bot-service']['url'], 
-        port=SERVICES['bot-service']['port'], 
-        log_level=SERVICES['bot-service']['log_level']
+        api,
+        host=cfg['url'],
+        port=cfg['port'],
+        log_level=cfg['log_level']
     )
     server = uvicorn.Server(config)
 
-    print(f"[BOT] starting polling + api on :{SERVICES['bot-service']['port']}")
+    print(f"[BOT] starting polling + api on :{cfg['port']}")
     await asyncio.gather(
-        dp.start_polling(bot),
+        start_bot(),
         server.serve()
     )
 

@@ -5,6 +5,7 @@ import subprocess
 import asyncio
 import os
 from pathlib import Path
+import importlib.util
 
 import httpx
 from fastapi import FastAPI, Request
@@ -12,8 +13,10 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- logging ---
-from logger import setup_logging
+from core.logger import setup_logging
 from core.config import SERVICES, GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL
+
+from services.bot.main import router as bot_router
 
 setup_logging("gateway")
 
@@ -23,19 +26,30 @@ sys.path.insert(0, str(ROOT))
 
 _processes: dict[str, subprocess.Popen] = {}
 
-# =====================================================
-# SERVICE CONTROL
-# =====================================================
 def start_services():
     for name, cfg in SERVICES.items():
-        script = ROOT / cfg["script"]
-        if not script.exists():
-            print(f"[GATEWAY] skip {name} — {script} not found")
+        # Try to import the FastAPI app from main.py
+        main_path = ROOT / cfg["script"]
+        try:
+            # Expect main.py to expose `api` if structured new way
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(name, str(main_path))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            app = getattr(mod, "api", None)
+            if app:
+                print(f"[GATEWAY] {name} exposes FastAPI app — skipping subprocess")
+                continue  # skip starting subprocess; gateway can directly proxy
+        except Exception:
+            pass  # fallback to old subprocess method
+
+        if not main_path.exists():
+            print(f"[GATEWAY] skip {name} — {main_path} not found")
             continue
 
         print(f"[GATEWAY] starting {name} on :{cfg['port']} with log_level={cfg['log_level']}")
         proc = subprocess.Popen(
-            [sys.executable, str(script)],
+            [sys.executable, str(main_path)],
             cwd=str(ROOT),
             env={
                 **os.environ,
@@ -80,6 +94,8 @@ async def lifespan(app: FastAPI):
 # APP INIT
 # =====================================================
 app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
+
+app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
 
 # =====================================================
 # INTERNAL PROXY
@@ -138,13 +154,25 @@ async def api_proxy(service: str, path: str, request: Request):
 # =====================================================
 @app.get("/health")
 async def health():
-    return {
-        "gateway": "ok",
-        "services": [
-            {"name": name, "url": f"{cfg['url']}:{cfg['port']}", "log_level": cfg["log_level"]}
-            for name, cfg in SERVICES.items()
-        ],
-    }
+    status = []
+    for name, cfg in SERVICES.items():
+        main_path = ROOT / cfg["script"]
+        try:
+            spec = importlib.util.spec_from_file_location(name, str(main_path))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            app = getattr(mod, "api", None)
+            has_app = bool(app)
+        except Exception:
+            has_app = False
+
+        status.append({
+            "name": name,
+            "url": f"{cfg['url']}:{cfg['port']}",
+            "log_level": cfg["log_level"],
+            "fastapi_app": has_app
+        })
+    return {"gateway": "ok", "services": status}
 
 # =====================================================
 # ENTRYPOINT
