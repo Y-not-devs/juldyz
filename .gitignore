@@ -75,3 +75,4 @@ docker-compose.override.yml
 *.swp
 /data
 /runtime
+/models

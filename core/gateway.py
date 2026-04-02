@@ -17,7 +17,7 @@ from core.logger import setup_logging
 from core.config import SERVICES, GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL
 
 from services.bot.main import router as bot_router
-
+from services.llm.main import router as llm_router
 setup_logging("gateway")
 
 # --- path setup ---
@@ -27,21 +27,12 @@ sys.path.insert(0, str(ROOT))
 _processes: dict[str, subprocess.Popen] = {}
 
 def start_services():
+    """
+    Start all services defined in SERVICES as subprocesses.
+    Each service runs its main.py script in its own process.
+    """
     for name, cfg in SERVICES.items():
-        # Try to import the FastAPI app from main.py
         main_path = ROOT / cfg["script"]
-        try:
-            # Expect main.py to expose `api` if structured new way
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(name, str(main_path))
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            app = getattr(mod, "api", None)
-            if app:
-                print(f"[GATEWAY] {name} exposes FastAPI app — skipping subprocess")
-                continue  # skip starting subprocess; gateway can directly proxy
-        except Exception:
-            pass  # fallback to old subprocess method
 
         if not main_path.exists():
             print(f"[GATEWAY] skip {name} — {main_path} not found")
@@ -55,21 +46,26 @@ def start_services():
                 **os.environ,
                 "PYTHONPATH": str(ROOT),
                 "SERVICE_NAME": name,
-                "SERVICE_PORT": str(cfg["port"]),
-                "SERVICE_LOG_LEVEL": cfg["log_level"],
+                "SERVICE_PORT": str(cfg['port']),
+                "SERVICE_LOG_LEVEL": cfg['log_level'],
             },
         )
         _processes[name] = proc
+        # Give a small delay to prevent port conflicts
         time.sleep(0.5)
 
+
 def stop_services():
+    """
+    Stop all running service subprocesses.
+    """
     for name, proc in _processes.items():
         print(f"[GATEWAY] stopping {name}")
         try:
             proc.terminate()
+            proc.wait(timeout=5)
         except Exception as e:
             print(f"[GATEWAY] error stopping {name}: {e}")
-
 def handle_exit(sig, frame):
     stop_services()
     sys.exit(0)
@@ -96,7 +92,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
 
 app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
-
+app.include_router(llm_router, prefix=f"/{SERVICES['llm-service']['prefix']}")
 # =====================================================
 # INTERNAL PROXY
 # =====================================================

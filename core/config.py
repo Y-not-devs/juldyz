@@ -37,6 +37,17 @@ SERVICES = {
         "port": int(os.getenv("PARSER_SERVICE_PORT", 8004)),
         "log_level": os.getenv("PARSER_SERVICE_LOG_LEVEL", "info"),
     },
+    "llm-service": {
+        "prefix": "llm-service",
+        "script": "services/llm/main.py",
+        "url": os.getenv("LLM_SERVICE_URL", "http://localhost"),
+        "port": int(os.getenv("LLM_SERVICE_PORT", 8005)),
+        "log_level": os.getenv("LLM_SERVICE_LOG_LEVEL", "info"),
+        "model_path": os.getenv("LLM_MODEL_PATH", "./models/qwen"),
+        "hf_model_id": os.getenv("LLM_HF_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct"),
+        "hf_token": os.getenv("LLM_HF_TOKEN"),
+        "mode": int(os.getenv("LLM_MODE", 1)),  # 0=offline, 1=auto_update, 2=token_update
+    },
 }
 
 # Google Form URL
