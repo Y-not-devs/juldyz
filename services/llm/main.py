@@ -5,14 +5,34 @@ from celery.result import AsyncResult
 
 from core.logger import setup_logging
 from core.config import SERVICES
+from core.db import db
 from core.celery_app import celery
 
-from services.llm.tasks import generate_text_task
+from services.llm.service import LLM_Service
+from services.llm.schemas.base import LLMGenerateRequest, LLMGenerateResponse, LLMTaskStatusResponse
 
 setup_logging(SERVICES['llm-service']['prefix'])
 
 api = FastAPI(title=f"{SERVICES['llm-service']['prefix']} API")
 router = APIRouter(tags=["llm-service"])
+llm_service = LLM_Service(
+    db=db,
+    # logger=setup_logging(SERVICES['llm-service']['prefix']),
+    model_path=SERVICES['llm-service']['model_path'],
+    hf_model_id=SERVICES['llm-service']['hf_model_id'],
+    hf_token=SERVICES['llm-service']['hf_token'],
+    mode=SERVICES['llm-service']['mode']
+)
+
+# @celery.task(name="llm.generate_text")
+# def generate_text_task(instruction: str, text: str):
+#     """
+#     Celery task to generate text using the LLM service.
+#     :param instruction: Instruction for the LLM.
+#     :param text: Input text for the LLM.
+#     :return: Generated text.
+#     """
+#     return llm_service.generate(f"{instruction}: {text}")
 
 @router.get("/health")
 async def health():
@@ -32,8 +52,9 @@ async def generate_text(prompt: dict):
             return {"error": "Both 'instruction' and 'text' are required"}
 
         # Queue the task
-        task = generate_text_task.delay(instruction, text)
-        return {"task_id": task.id}
+        prompt_text = f"{instruction}: {text}"
+        response = llm_service.generate_response(prompt_text)
+        return {"response": response}
     except Exception as e:
         return {"error": str(e)}
 
