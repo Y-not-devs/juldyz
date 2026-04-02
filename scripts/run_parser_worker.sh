@@ -8,7 +8,8 @@ cd "$PROJECT_ROOT"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/parser_common.sh"
 
+enter_project_root
 load_parser_env
-ensure_parser_redis
+VENV_PYTHON="$(resolve_venv_python)"
 
-celery -A core.celery_app:celery worker --loglevel=info -Q parser,llm
+"$VENV_PYTHON" -m celery -A core.celery_app:celery worker --loglevel=info -Q parser,llm
