@@ -1,71 +1,58 @@
 import asyncio
-import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 import uvicorn
+from fastapi import FastAPI, APIRouter
+from fastapi.responses import JSONResponse
 
-from core.db import db
 from core.config import SERVICES
 from core.logger import setup_logging
+from services.form.service import FormService
+from services.form.schemas.payload import FormSubmitRequest, FormSubmitResponse
 
-setup_logging("form")
+setup_logging(SERVICES['form-service']['prefix'])
 
 api = FastAPI(title=f"{SERVICES['form-service']['prefix']} API")
+router = APIRouter(tags=["form-service"])
 
-@api.post("/form-submit")
-async def form_submit(request: Request):
-    payload = await request.json()
-
-    # log full payload
-    print(f"[FORM] received payload: {payload}")
-
-    tg_id = str(payload.get("tg_id", "")).strip()
+# --- Routes ---
+@router.post("/form-submit", response_model=FormSubmitResponse)
+async def form_submit(payload: FormSubmitRequest):
+    tg_id = payload.tg_id.strip()
     if not tg_id:
         return JSONResponse({"status": "error", "detail": "no tg_id"}, status_code=400)
 
-    candidate = db.get_user_by_tg(tg_id)
+    candidate = FormService.get_candidate(tg_id)
     if not candidate:
         return JSONResponse(
             {"status": "error", "detail": "candidate not found, start bot first"},
             status_code=404
-            )
+        )
 
     candidate_id = candidate["id"]
-    db.save_candidate_response(candidate_id, payload)
-
-    # notify bot
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{SERVICES['bot-service']['url']}:{SERVICES['bot-service']['port']}/notify",
-                json={
-                    "tg_id": tg_id,
-                    "candidate_id": candidate_id
-                },
-                timeout=5
-            )
-    except Exception as e:
-        print(f"[FORM] bot notify failed: {e}")
+    FormService.save_response(candidate_id, payload.dict())
 
     print(f"[FORM] candidate_id={candidate_id} tg_id={tg_id} form saved")
-    return JSONResponse({"status": "ok", "candidate_id": candidate_id})
+    return {"status": "ok", "candidate_id": candidate_id}
 
-@api.get("/health")
-def health():
+@router.get("/health")
+async def health():
     return {"status": "ok", "service": "form"}
+
+# Include router in API
+api.include_router(router)
 
 # --- Entry point ---
 async def main():
+    cfg = SERVICES['form-service']
     config = uvicorn.Config(
         api,
-        host=SERVICES['form-service']['url'],
-        port=SERVICES['form-service']['port'],
-        log_level=SERVICES['form-service']['log_level']
+        host=cfg['url'],
+        port=cfg['port'],
+        log_level=cfg['log_level']
     )
     server = uvicorn.Server(config)
-    
-    print(f"[FORM] starting api on :{SERVICES['form-service']['port']}")
+    print(f"[FORM] starting api on :{cfg['port']}")
     await server.serve()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
