@@ -20,16 +20,9 @@ Use the same project `.venv` and root `requirements.txt` as other services.
    - `CELERY_BROKER_URL=redis://localhost:6379/0`
    - `CELERY_RESULT_BACKEND=redis://localhost:6379/1`
 5. Start parser API:
-   - PowerShell: `.\scripts\run_parser.ps1`
    - Bash: `bash scripts/run_parser.sh`
 6. Start worker:
-   - PowerShell: `.\scripts\run_parser_worker.ps1`
-   - Bash: `bash scripts/run_parser_worker.sh`
-
-## One Command Local Start (PowerShell)
-- `.\scripts\run_parser_local.ps1`
-- with dependency install: `.\scripts\run_parser_local.ps1 -InstallDeps`
-- This starts both parser API and Celery worker from `.venv`.
+   - Bash: `bash scripts/run_worker.sh`
 
 ## Notes
 - Docker files/scripts for parser local stack were removed temporarily.

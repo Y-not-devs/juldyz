@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run_common.sh"
 
-load_parser_env() {
+load_celery_env() {
   load_project_env
 
   # Backward compatibility for old parser-specific env names.
