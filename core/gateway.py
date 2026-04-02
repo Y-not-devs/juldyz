@@ -19,6 +19,7 @@ from core.config import SERVICES, GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL
 from services.bot.main import router as bot_router
 from services.llm.main import router as llm_router
 from services.form.main import router as form_router
+from services.parser.main import router as parser_router
 from services.scoring.main import router as scoring_router
 setup_logging("gateway")
 
@@ -96,6 +97,7 @@ app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
 app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
 app.include_router(llm_router, prefix=f"/{SERVICES['llm-service']['prefix']}")
 app.include_router(form_router, prefix=f"/{SERVICES['form-service']['prefix']}")
+app.include_router(parser_router, prefix=f"/{SERVICES['parser-service']['prefix']}")
 app.include_router(scoring_router, prefix=f"/{SERVICES['scoring-service']['prefix']}")
 # =====================================================
 # INTERNAL PROXY

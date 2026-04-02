@@ -12,4 +12,4 @@ enter_project_root
 load_celery_env
 VENV_PYTHON="$(resolve_venv_python)"
 
-"$VENV_PYTHON" -m services.parser.main
+"$VENV_PYTHON" -m celery -A core.celery_app:celery worker --loglevel=info -Q parser,llm
