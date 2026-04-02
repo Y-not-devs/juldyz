@@ -23,6 +23,13 @@ SERVICES = {
         "port": int(os.getenv("BOT_SERVICE_PORT", 8002)),
         "log_level": os.getenv("BOT_SERVICE_LOG_LEVEL", "info"),
     },
+    "dashboard-service": {
+        "prefix": "dashboard-service",
+        "script": "services/dashboard/main.py",
+        "url": os.getenv("DASHBOARD_SERVICE_URL", "http://localhost"),
+        "port": int(os.getenv("DASHBOARD_SERVICE_PORT", 8006)),
+        "log_level": os.getenv("DASHBOARD_SERVICE_LOG_LEVEL", "info"),
+    },
     "scoring-service": {
         "prefix": "scoring-service",
         "script": "services/scoring/main.py",

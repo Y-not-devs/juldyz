@@ -1,9 +1,25 @@
 import streamlit as st
 import requests
+from fastapi import FastAPI, APIRouter
+
 from core.logger import setup_logging
+from core.config import SERVICES
 setup_logging("dashboard")
 
 SCORING_API_URL = "http://127.0.0.1:8003/evaluate"
+
+api = FastAPI(title=f"{SERVICES['dashboard-service']['prefix']} API")
+router = APIRouter(tags=["dashboard-service"])
+
+@router.post("/dashboard")
+async def notify():
+    return {"status": "ok"}
+
+@router.get("/health")
+async def health():
+    return {"status": "ok", "service": "bot"}
+
+api.include_router(router)
 
 # Настройки страницы
 st.set_page_config(page_title="inVision U - Приемная комиссия", layout="wide", page_icon="🎓")
@@ -87,3 +103,4 @@ if submit_btn:
 else:
     # Заглушка, пока кнопка не нажата
     st.info("Введите данные кандидата в панели слева и нажмите 'Оценить кандидата'.")
+
