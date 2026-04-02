@@ -22,8 +22,9 @@ services:
     env_file:
       - .env
     environment:
-      PARSER_CELERY_BROKER_URL: redis://parser-redis:6379/0
-      PARSER_CELERY_RESULT_BACKEND: redis://parser-redis:6379/0
+      CELERY_BROKER_URL: redis://parser-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://parser-redis:6379/1
+      REDIS_URL: redis://parser-redis:6379/0
     depends_on:
       parser-redis:
         condition: service_healthy
@@ -42,12 +43,13 @@ services:
     env_file:
       - .env
     environment:
-      PARSER_CELERY_BROKER_URL: redis://parser-redis:6379/0
-      PARSER_CELERY_RESULT_BACKEND: redis://parser-redis:6379/0
+      CELERY_BROKER_URL: redis://parser-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://parser-redis:6379/1
+      REDIS_URL: redis://parser-redis:6379/0
     depends_on:
       parser-redis:
         condition: service_healthy
-    command: celery -A services.parser.celery_app:celery_app worker --loglevel=info
+    command: celery -A core.celery_app:celery worker --loglevel=info -Q parser,llm
     volumes:
       - ./data:/app/data
 

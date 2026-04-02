@@ -55,7 +55,7 @@ command for run parser-service with docker(with redis)
 Use this mode only if you intentionally do not run the full parser Docker stack.
 
 1. Install parser dependencies:
-   - `pip install -r services/parser/requirements.txt`
+   - `pip install -r requirements.txt`
 2. Install Docker Desktop and make sure daemon is running.
 3. Start API:
    - `bash scripts/run_parser.sh`
@@ -87,8 +87,8 @@ If you want to remove Redis persisted volume too:
 - If broker URL points to non-local Redis, docker autostart is skipped.
 
 ## Optional Env
-- `PARSER_CELERY_BROKER_URL` (default: `redis://localhost:6379/0`)
-- `PARSER_CELERY_RESULT_BACKEND` (default: same as broker)
+- `CELERY_BROKER_URL` (default: `redis://localhost:6379/0`)
+- `CELERY_RESULT_BACKEND` (default: `redis://localhost:6379/1`)
 - `PARSER_REDIS_CONTAINER_NAME` (default: `juldyz-parser-redis`)
 - `PARSER_REDIS_IMAGE` (default: `redis:7-alpine`)
 

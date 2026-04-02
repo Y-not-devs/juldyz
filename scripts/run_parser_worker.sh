@@ -11,4 +11,4 @@ source "$SCRIPT_DIR/parser_common.sh"
 load_parser_env
 ensure_parser_redis
 
-celery -A services.parser.celery_app:celery_app worker --loglevel=info
+celery -A core.celery_app:celery worker --loglevel=info -Q parser,llm

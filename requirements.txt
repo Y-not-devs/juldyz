@@ -1,0 +1,10 @@
+aiogram
+celery[redis]
+fastapi
+httpx
+pydantic
+pypdf
+python-dotenv
+redis
+tenacity
+uvicorn

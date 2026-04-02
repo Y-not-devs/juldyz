@@ -11,6 +11,7 @@ from services.parser.service import ParserService
 setup_logging(SERVICES['parser-service']['prefix'])
 
 api = FastAPI(title=f"{SERVICES['parser-service']['prefix']} API")
+app = api
 router = APIRouter(tags=["parser-service"])
 parser_service = ParserService()
 

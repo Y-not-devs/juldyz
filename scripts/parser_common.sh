@@ -9,7 +9,11 @@ load_parser_env() {
     set +a
   fi
 
-  : "${PARSER_CELERY_BROKER_URL:=redis://localhost:6379/0}"
+  if [[ -z "${CELERY_BROKER_URL:-}" && -n "${PARSER_CELERY_BROKER_URL:-}" ]]; then
+    CELERY_BROKER_URL="$PARSER_CELERY_BROKER_URL"
+  fi
+
+  : "${CELERY_BROKER_URL:=redis://localhost:6379/0}"
   : "${PARSER_REDIS_CONTAINER_NAME:=juldyz-parser-redis}"
   : "${PARSER_REDIS_IMAGE:=redis:7-alpine}"
 }
@@ -35,7 +39,7 @@ parse_redis_url() {
 
 ensure_parser_redis() {
   local host port
-  read -r host port < <(parse_redis_url "$PARSER_CELERY_BROKER_URL")
+  read -r host port < <(parse_redis_url "$CELERY_BROKER_URL")
 
   if [[ "$host" != "localhost" && "$host" != "127.0.0.1" ]]; then
     echo "[parser] Using external Redis at $host:$port (docker autostart skipped)."
@@ -43,7 +47,7 @@ ensure_parser_redis() {
   fi
 
   if ! command -v docker >/dev/null 2>&1; then
-    echo "[parser] Docker is required for local Redis autostart. Install Docker or set PARSER_CELERY_BROKER_URL to external Redis."
+    echo "[parser] Docker is required for local Redis autostart. Install Docker or set CELERY_BROKER_URL to external Redis."
     exit 1
   fi
 

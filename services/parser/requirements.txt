@@ -1,7 +1,0 @@
-fastapi
-pydantic
-httpx
-uvicorn
-celery[redis]
-tenacity
-pypdf
