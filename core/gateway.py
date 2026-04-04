@@ -22,6 +22,12 @@ from core.logger import setup_logging
 from core.orchestrator import Orchestrator, PipelineRegistry
 from core.pipelines import CandidatePipeline
 
+from services.bot.main import router as bot_router
+from services.llm.main import router as llm_router
+from services.form.main import router as form_router
+from services.parser.main import router as parser_router
+from services.scoring.main import router as scoring_router
+from services.dashboard.main import router as dashboard_router
 setup_logging("gateway")
 
 ROOT = Path(__file__).parent.parent
@@ -114,7 +120,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
 
 
-async def _proxy(service: str, path: str, request: Request) -> JSONResponse:
+app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
+app.include_router(llm_router, prefix=f"/{SERVICES['llm-service']['prefix']}")
+app.include_router(form_router, prefix=f"/{SERVICES['form-service']['prefix']}")
+app.include_router(parser_router, prefix=f"/{SERVICES['parser-service']['prefix']}")
+app.include_router(scoring_router, prefix=f"/{SERVICES['scoring-service']['prefix']}")
+app.include_router(dashboard_router, prefix=f"/{SERVICES['dashboard-service']['prefix']}")
+# =====================================================
+# INTERNAL PROXY
+# =====================================================
+async def _proxy(service: str, path: str, request: Request):
     cfg = SERVICES.get(service)
     if not cfg:
         return JSONResponse({"error": f"unknown service '{service}'"}, status_code=404)

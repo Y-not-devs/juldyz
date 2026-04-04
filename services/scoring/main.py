@@ -16,6 +16,27 @@ router = APIRouter(tags=["scoring-service"])
 async def health():
     return {"status": "ok", "service": "scoring"}
 
+
+#llm_cfg = SERVICES['llm-service']
+# Формируем базовый URL для обращения к LLM-сервису
+#llm_url = f"http://{llm_cfg.get('url', '127.0.0.1')}:{llm_cfg.get('port', 8000)}"
+#scoring_service = ScoringService(llm_url=llm_url)
+
+# Используем ScoringService без внешних зависимостей (Mock)
+scoring_service = ScoringService()
+
+@router.post("/evaluate")
+async def evaluate(candidate_data: dict):
+    """
+    Эндпоинт для оценки кандидата. 
+    Принимает JSON с данными формы, гитхаба и т.д.
+    """
+    try:
+        result = await scoring_service.evaluate_candidate(candidate_data)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
 api.include_router(router)
 
 # --- Entry point ---
@@ -23,7 +44,7 @@ async def main():
     cfg = SERVICES['scoring-service']
     config = uvicorn.Config(
         api,
-        host=cfg['url'],
+        host="127.0.0.1",
         port=cfg['port'],
         log_level=cfg['log_level']
     )
