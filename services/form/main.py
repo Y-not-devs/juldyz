@@ -27,11 +27,12 @@ async def form_submit(payload: FormSubmitRequest):
             status_code=404
         )
 
+    raw = payload.model_dump()
     candidate_id = candidate["id"]
-    FormService.save_response(candidate_id, payload.dict())
+    FormService.save_response(candidate_id, raw)
 
-    print(f"[FORM] candidate_id={candidate_id} tg_id={tg_id} form saved")
-    return {"status": "ok", "candidate_id": candidate_id}
+    print(f"[FORM] saved candidate_id={candidate_id} tg_id={tg_id}")
+    return {"status": "ok", "candidate_id": str(candidate_id)}
 
 @router.get("/health")
 async def health():
