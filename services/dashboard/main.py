@@ -1,5 +1,5 @@
-import streamlit as st
-import requests
+
+import requests 
 from fastapi import FastAPI, APIRouter
 
 from core.logger import setup_logging
@@ -17,7 +17,7 @@ async def notify():
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "bot"}
+    return {"status": "ok", "service": "dashboard"}
 
 api.include_router(router)
 
