@@ -1,9 +1,10 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 
 class FormSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    
     tg_id: str = Field(..., description="Telegram ID of the candidate")
-    # Optional: allow any extra fields in the form payload
     data: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class FormSubmitResponse(BaseModel):
