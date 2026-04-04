@@ -45,4 +45,4 @@ class BotService:
         )
 
     async def start_polling(self):
-        await self.dp.start_polling(self.bot)
+        await self.dp.start_polling(self.bot, handle_signals=False)

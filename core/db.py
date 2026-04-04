@@ -40,23 +40,39 @@ class Database:
             );
 
             CREATE TABLE IF NOT EXISTS candidate_responses (
-                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id              INTEGER NOT NULL REFERENCES users(id),
-                timestamp            TEXT DEFAULT (datetime('now')),
-                email                TEXT,
-                last_name            TEXT,
-                first_name           TEXT,
-                patronymic           TEXT,
-                dob                  TEXT,
-                citizenship          TEXT,
-                iin                  TEXT,
-                program_applied      TEXT,
-                major                TEXT,
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id               INTEGER NOT NULL REFERENCES users(id),
+                timestamp             TEXT DEFAULT (datetime('now')),
+
+                -- identity
+                email                 TEXT,
+                last_name             TEXT,
+                first_name            TEXT,
+                patronymic            TEXT,
+                dob                   TEXT,
+                mobile_phone          TEXT,
+
+                -- contacts
+                instagram             TEXT,
+                telegram_handle       TEXT,
+                whatsapp              TEXT,
+
+                -- application
+                program_applied       TEXT,
+                major                 TEXT,
                 personal_presentation TEXT,
-                english_results      TEXT,
-                social_certificate   TEXT,
-                additional_info      TEXT,
-                raw_payload          TEXT DEFAULT '{}'
+                english_results       TEXT,
+
+                -- essays
+                essay_failure         TEXT,
+                essay_beta            TEXT,
+
+                -- semi-structured (stored as JSON)
+                honors_raw            TEXT DEFAULT '[]',
+                activities_raw        TEXT DEFAULT '[]',
+
+                -- full payload
+                raw_payload           TEXT DEFAULT '{}'
             );
 
             CREATE TABLE IF NOT EXISTS user_files (
@@ -149,28 +165,54 @@ class Database:
 
     # --- candidate_responses ---
     def save_candidate_response(self, user_id: int, payload: dict) -> int:
-        fields = [
-            "email", "last_name", "first_name", "patronymic", "dob",
-            "citizenship", "iin", "program_applied", "major",
-            "personal_presentation", "english_results",
-            "social_certificate", "additional_info"
-        ]
-        values = {f: payload.get(f) for f in fields}
+        honors = {k: payload.get(k, "") for k in [
+            "Honors 1 title", "Honors 2 title", "Honors 3 title",
+            "Honors 4 title", "Honors 5 title", "Grade level",
+            "Level(s) of recognition", "Do you have other honors?"
+        ]}
+        activities = {k: payload.get(k, "") for k in [
+            "Activity type",
+            "Position/Leadership description\n(Max characters: 50)",
+            "Organization Name\n(Max characters: 50)",
+            "Please describe this activity, including what you accomplished and any recognition you received, etc.\n(Max characters: 150)"
+        ]}
 
         with self._connect() as conn:
-            cur = conn.execute(f"""
-                INSERT INTO candidate_responses
-                    (user_id, email, last_name, first_name, patronymic, dob,
-                     citizenship, iin, program_applied, major,
-                     personal_presentation, english_results,
-                     social_certificate, additional_info, raw_payload)
-                VALUES
-                    (:user_id, :email, :last_name, :first_name, :patronymic, :dob,
-                     :citizenship, :iin, :program_applied, :major,
-                     :personal_presentation, :english_results,
-                     :social_certificate, :additional_info, :raw)
-            """, {**values, "user_id": user_id,
-                  "raw": json.dumps(payload, ensure_ascii=False)})
+            cur = conn.execute("""
+                INSERT INTO candidate_responses (
+                    user_id, email, last_name, first_name, patronymic, dob,
+                    mobile_phone, instagram, telegram_handle, whatsapp,
+                    program_applied, major, personal_presentation, english_results,
+                    essay_failure, essay_beta,
+                    honors_raw, activities_raw, raw_payload
+                ) VALUES (
+                    :user_id, :email, :last_name, :first_name, :patronymic, :dob,
+                    :mobile_phone, :instagram, :telegram_handle, :whatsapp,
+                    :program_applied, :major, :personal_presentation, :english_results,
+                    :essay_failure, :essay_beta,
+                    :honors_raw, :activities_raw, :raw_payload
+                )
+            """, {
+                "user_id":               user_id,
+                "email":                 payload.get("Email Address") or payload.get("email"),
+                "last_name":             payload.get("Last Name"),
+                "first_name":            payload.get("First Name"),
+                "patronymic":            payload.get("Patronymic"),
+                "dob":                   payload.get("Date of Birth"),
+                "mobile_phone":          payload.get("Mobile phone number"),
+                "instagram":             payload.get("Instagram"),
+                "telegram_handle":       payload.get("Telegram"),
+                "whatsapp":              payload.get("WhatsApp"),
+                "program_applied":       payload.get("  Which program are you applying for?  "),
+                "major":                 payload.get("Please specify your intended major:  "),
+                "personal_presentation": payload.get("Personal Presentation (Foundation)") or payload.get("Personal Presentation (Undergraduate)"),
+                "english_results":       payload.get("English proficiency results (Foundation)") or payload.get("English proficiency results (Undergraduate)"),
+                "essay_failure":         payload.get("Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)"),
+                "essay_beta":            payload.get('The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)'),
+                "honors_raw":            json.dumps(honors, ensure_ascii=False),
+                "activities_raw":        json.dumps(activities, ensure_ascii=False),
+                "raw_payload":           json.dumps(payload, ensure_ascii=False),
+            })
             return cur.lastrowid
 
     def get_candidate_response(self, user_id: int) -> dict | None:
