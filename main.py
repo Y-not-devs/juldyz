@@ -1,9 +1,9 @@
 import asyncio
 from core.gateway import app as gateway_app
-from core.celery_app import celery
+from core.config import GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL
 import uvicorn
 
-async def start_gateway():
+def start_gateway():
     """
     Start the FastAPI gateway.
     """
@@ -20,14 +20,9 @@ async def start_gateway():
 #     worker_app = worker(app=celery)
 #     worker_app.run(loglevel="info")
 
-async def main():
-    """
-    Main entry point for the application.
-    """
-
-    # Start gateway and Celery worker concurrently
-    await asyncio.gather(
-        start_gateway()
-    )
+def main():
+    uvicorn.run(gateway_app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level=LOG_LEVEL)
+    print(f"[MAIN] starting api on :{GATEWAY_PORT}")
+ 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
