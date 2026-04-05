@@ -27,8 +27,9 @@ SERVICES = {
         "prefix": "dashboard-service",
         "script": "services/dashboard/main.py",
         "url": os.getenv("DASHBOARD_SERVICE_URL", "http://localhost"),
-        "port": int(os.getenv("DASHBOARD_SERVICE_PORT", 8006)),
+        "port": int(os.getenv("DASHBOARD_SERVICE_PORT", 8501)),
         "log_level": os.getenv("DASHBOARD_SERVICE_LOG_LEVEL", "info"),
+        "page_port": int(os.getenv("DASHBOARD_SERVICE_PAGE_PORT", 8502)),
     },
     "scoring-service": {
         "prefix": "scoring-service",

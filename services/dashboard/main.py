@@ -9,15 +9,17 @@ import uvicorn
 setup_logging("dashboard")
 
 def run_dashboard():
-    subprocess.Popen([
+    port = SERVICES["dashboard-service"]["page_port"]
+    process = subprocess.Popen([
         sys.executable,
         "-m",
         "streamlit",
         "run",
-        "service.py",
-        f"--server.port={SERVICES["dashboard-ui"]["port"]}",
+        "services/dashboard/service.py",
+        f"--server.port={port}",
         "--server.headless=true",
     ])
+    return process
 
 
 def stop_dashboard(process):
@@ -37,16 +39,13 @@ async def health():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
     process = run_dashboard()
     app.state.dashboard_process = process
-
     yield
+    stop_dashboard(process)
 
-    # shutdown
-    stop_dashboard(app.state.dashboard_process)
-    
 api.include_router(router)
+run_dashboard()
 async def main():
     cfg = SERVICES["dashboard-service"]
     config = uvicorn.Config(
