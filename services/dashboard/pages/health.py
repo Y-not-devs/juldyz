@@ -7,7 +7,7 @@ import streamlit as st
 DEFAULT_API_BASE_URL = os.getenv("JULDYZ_API_BASE_URL", "http://localhost:8000")
 
 st.set_page_config(
-    page_title="Juldyz Dashboard Overview",
+    page_title="Juldyz Health Check",
     page_icon=":clipboard:",
     layout="wide",
 )
