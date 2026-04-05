@@ -1,5 +1,6 @@
 import streamlit as st
-
+import requests
+from core.config import SERVICES
 st.set_page_config(
     page_title="inVision U",
     layout="wide",
@@ -38,7 +39,7 @@ if submit_btn:
     with st.spinner("Идет глубокий анализ профиля кандидата силами AI..."):
         try:
             # Делаем запрос к нашему сервису скоринга
-            response = requests.post(SCORING_API_URL, json=payload)
+            response = requests.post(f"{SERVICES["scoring-service"]["url"]}:{SERVICES["scoring-service"]["port"]}/score", json=payload)
             response.raise_for_status()
             data = response.json()
             
