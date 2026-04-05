@@ -12,7 +12,6 @@ from xml.etree import ElementTree
 
 import httpx
 
-from core.celery_app import celery
 from services.parser.storage import setup_user_directories, write_json_file
 from services.parser.validation import ensure_safe_identifier, normalize_youtube_video_id
 
@@ -516,7 +515,6 @@ def _question_coverage(text: str) -> list[dict[str, Any]]:
     return results
 
 
-@celery.task(name="parser.parse_video_task")
 def parse_video_task(user_id: str, youtube_video_id: str) -> dict[str, Any]:
     safe_user_id = ensure_safe_identifier(user_id, "user_id")
     safe_video_id = normalize_youtube_video_id(youtube_video_id)
