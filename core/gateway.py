@@ -40,6 +40,14 @@ INTERNAL_FASTAPI_SERVICES = {
     "llm-service",
 }
 
+def start_dashboard():
+    subprocess.Popen([
+        "streamlit",
+        "run",
+        "services/dashboard/app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501",
+    ])
 
 def _service_app_key(service_name: str) -> str:
     module_path = SERVICES[service_name]["script"].replace("\\", "/").replace("/", ".")
@@ -74,6 +82,7 @@ def start_services() -> None:
         )
         _processes[name] = proc
         time.sleep(0.3)
+    start_dashboard()
 
 
 def stop_services() -> None:
