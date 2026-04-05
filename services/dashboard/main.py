@@ -1,32 +1,52 @@
-import asyncio
-import os
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, APIRouter
+from core.logger import setup_logging
+from core.config import SERVICES
+import subprocess
+import sys
 
 import uvicorn
-from fastapi import APIRouter, FastAPI
-from fastapi.responses import RedirectResponse
+setup_logging("dashboard")
 
-from core.config import SERVICES
+def run_dashboard():
+    subprocess.Popen([
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        "service.py",
+        f"--server.port={SERVICES["dashboard-ui"]["port"]}",
+        "--server.headless=true",
+    ])
+
+
+def stop_dashboard(process):
+    if process and process.poll() is None:
+        process.terminate()
 
 api = FastAPI(title=f"{SERVICES['dashboard-service']['prefix']} API")
-app = api
 router = APIRouter(tags=["dashboard-service"])
 
-STREAMLIT_DASHBOARD_URL = os.getenv("STREAMLIT_DASHBOARD_URL", "http://localhost:8501")
-
-
-@router.get("/")
-async def dashboard_root():
-    return RedirectResponse(url=STREAMLIT_DASHBOARD_URL, status_code=307)
-
+@router.post("/dashboard")
+async def notify():
+    return {"status": "ok"}
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "dashboard"}
+    return {"status": "ok"}
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    process = run_dashboard()
+    app.state.dashboard_process = process
 
+    yield
+
+    # shutdown
+    stop_dashboard(app.state.dashboard_process)
+    
 api.include_router(router)
-
-
 async def main():
     cfg = SERVICES["dashboard-service"]
     config = uvicorn.Config(
@@ -38,7 +58,3 @@ async def main():
     server = uvicorn.Server(config)
     print(f"[DASHBOARD] starting api on :{cfg['port']}")
     await server.serve()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
