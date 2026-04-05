@@ -4,7 +4,6 @@ from fastapi import FastAPI, APIRouter
 
 from core.logger import setup_logging
 from core.config import SERVICES
-from core.db import db
 
 from services.scoring.service import ScoringService
 setup_logging(SERVICES['scoring-service']['prefix'])
@@ -16,13 +15,6 @@ router = APIRouter(tags=["scoring-service"])
 async def health():
     return {"status": "ok", "service": "scoring"}
 
-
-#llm_cfg = SERVICES['llm-service']
-# Формируем базовый URL для обращения к LLM-сервису
-#llm_url = f"http://{llm_cfg.get('url', '127.0.0.1')}:{llm_cfg.get('port', 8000)}"
-#scoring_service = ScoringService(llm_url=llm_url)
-
-# Используем ScoringService без внешних зависимостей (Mock)
 scoring_service = ScoringService()
 
 @router.post("/evaluate")

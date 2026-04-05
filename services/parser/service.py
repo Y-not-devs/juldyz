@@ -1,6 +1,5 @@
 from typing import Optional
 from celery.result import AsyncResult
-from core.celery_app import celery
 from services.parser.storage import setup_user_directories
 from services.parser.tasks import parse_file_task, parse_github_task
 from services.parser.validation import ensure_safe_identifier, extract_github_username
@@ -40,15 +39,3 @@ class ParserService:
             "github_username": github_username,
             **task_ids,
         }
-
-    @staticmethod
-    def get_task_status(task_id: str) -> dict:
-        task_result = AsyncResult(task_id, app=celery)
-        payload = {"task_id": task_id, "status": task_result.status}
-
-        if task_result.successful():
-            payload["result"] = task_result.result
-        elif task_result.failed():
-            payload["error"] = str(task_result.result)
-
-        return payload

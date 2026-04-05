@@ -6,7 +6,6 @@ from celery.result import AsyncResult
 from core.logger import setup_logging
 from core.config import SERVICES
 from core.db import db
-from core.celery_app import celery
 
 from services.llm.service import LLM_Service
 from services.llm.schemas.base import LLMGenerateRequest, LLMGenerateResponse, LLMTaskStatusResponse
@@ -55,21 +54,6 @@ async def generate_text(prompt: dict):
         prompt_text = f"{instruction}: {text}"
         response = llm_service.generate_response(prompt_text)
         return {"response": response}
-    except Exception as e:
-        return {"error": str(e)}
-
-@router.get("/result/tasks/{task_id}")
-async def check_task_status(task_id: str):
-    """
-    Check the status of a Celery task.
-    :param task_id: The ID of the task to check.
-    :return: The status and result of the task.
-    """
-    try:
-        task_result = AsyncResult(task_id, app=celery)
-        status = task_result.status
-        result = task_result.result if task_result.successful() else None
-        return {"task_id": task_id, "status": status, "result": result}
     except Exception as e:
         return {"error": str(e)}
 
