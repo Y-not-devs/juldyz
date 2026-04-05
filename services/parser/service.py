@@ -1,5 +1,4 @@
 from typing import Optional
-from celery.result import AsyncResult
 from services.parser.storage import setup_user_directories
 from services.parser.tasks import parse_file_task, parse_github_task
 from services.parser.tasks_video import parse_video_task

@@ -12,7 +12,6 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from core.celery_app import celery
 from services.parser.storage import setup_user_directories, write_json_file
 from services.parser.validation import ensure_safe_identifier, normalize_github_username
 
@@ -298,7 +297,6 @@ def _fetch_github_profile(github_username: str) -> dict:
     }
 
 
-@celery.task(name="parser.parse_github_task")
 def parse_github_task(user_id: str, github_username: str) -> dict:
     safe_user_id = ensure_safe_identifier(user_id, "user_id")
     safe_username = normalize_github_username(github_username)
@@ -322,7 +320,6 @@ def parse_github_task(user_id: str, github_username: str) -> dict:
     }
 
 
-@celery.task(name="parser.parse_file_task")
 def parse_file_task(user_id: str, file_id: str) -> dict:
     safe_user_id = ensure_safe_identifier(user_id, "user_id")
     safe_file_id = ensure_safe_identifier(file_id, "file_id")
