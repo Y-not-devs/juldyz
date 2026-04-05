@@ -38,6 +38,7 @@ INTERNAL_FASTAPI_SERVICES = {
     "scoring-service",
     "parser-service",
     "llm-service",
+    "dashboard-service",
 }
 
 
