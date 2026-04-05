@@ -77,3 +77,13 @@ class ParserService:
             },
             "results": results,
         }
+
+    @staticmethod
+    def get_task_status(task_id: str) -> dict:
+        safe_task_id = ensure_safe_identifier(task_id, "task_id")
+        return {
+            "status": "UNAVAILABLE",
+            "mode": "direct",
+            "task_id": safe_task_id,
+            "detail": "Direct mode executes parser tasks immediately and does not create queued task IDs.",
+        }
