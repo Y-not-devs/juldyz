@@ -21,12 +21,16 @@ class ParseRequest(BaseModel):
     file_id: Optional[str] = None
     github_url: Optional[HttpUrl] = None
     youtube_url: Optional[HttpUrl] = None
+    essay_text: Optional[str] = None
 
 
 @router.post("/parse")
 async def start_parsing(request: ParseRequest):
-    if not request.file_id and not request.github_url and not request.youtube_url:
-        raise HTTPException(status_code=422, detail="Provide file_id and/or github_url and/or youtube_url")
+    if not request.file_id and not request.github_url and not request.youtube_url and not request.essay_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide file_id and/or github_url and/or youtube_url and/or essay_text",
+        )
 
     try:
         return parser_service.queue_tasks(
@@ -34,6 +38,7 @@ async def start_parsing(request: ParseRequest):
             file_id=request.file_id,
             github_url=request.github_url,
             youtube_url=request.youtube_url,
+            essay_text=request.essay_text,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

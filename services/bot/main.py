@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter
+from pydantic import BaseModel
 import uvicorn
 from core.db import db
 from core.config import TELEGRAM_TOKEN, GOOGLE_FORM_URL, QUESTION_FIELD_ID, SERVICES
@@ -29,9 +30,21 @@ async def lifespan(app: FastAPI):
 api = FastAPI(lifespan=lifespan)
 router = APIRouter(tags=["bot-service"])
 
+
+class SendRequest(BaseModel):
+    candidate_id: str
+    text: str
+
+
+@router.post("/notify")
+async def notify(data: NotifyRequest):
+    await bot_service.notify_user(data.tg_id)
+    return {"status": "ok"}
+
+
 @router.post("/send")
-async def notify(candidate_id: str, text: str):
-    await bot_service.send_message(candidate_id, text)
+async def send(data: SendRequest):
+    await bot_service.send_message(data.candidate_id, data.text)
     return {"status": "ok"}
 
 @router.get("/health")

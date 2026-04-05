@@ -30,9 +30,20 @@ async def form_submit(payload: FormSubmitRequest):
 
     raw = payload.model_dump()
     candidate_id = candidate["id"]
+    raw["candidate_id"] = str(candidate_id)
     FormService.save_response(candidate_id, raw)
-    await orchestrator.handle_form_submission(raw)
+    orchestration_error = None
+    try:
+        await orchestrator.handle_form_submission(raw)
+    except Exception as exc:
+        orchestration_error = str(exc)
     print(f"[FORM] saved candidate_id={candidate_id} tg_id={tg_id}")
+    if orchestration_error:
+        return {
+            "status": "ok",
+            "candidate_id": str(candidate_id),
+            "detail": f"saved, but orchestration failed: {orchestration_error}",
+        }
     return {"status": "ok", "candidate_id": str(candidate_id)}
 
 @router.get("/health")

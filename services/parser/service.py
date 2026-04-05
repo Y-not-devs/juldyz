@@ -1,6 +1,7 @@
 from typing import Optional
 from services.parser.storage import setup_user_directories
 from services.parser.tasks import parse_file_task, parse_github_task
+from services.parser.tasks_essay import parse_essay_task
 from services.parser.tasks_video import parse_video_task
 from services.parser.validation import (
     ensure_safe_identifier,
@@ -30,12 +31,14 @@ class ParserService:
         file_id: Optional[str] = None,
         github_url: Optional[str] = None,
         youtube_url: Optional[str] = None,
+        essay_text: Optional[str] = None,
     ) -> dict:
         # Validate identifiers
         user_id = ensure_safe_identifier(user_id, "user_id")
         file_id_safe = ensure_safe_identifier(file_id, "file_id") if file_id else None
         github_username = extract_github_username(str(github_url)) if github_url else None
         youtube_video_id = extract_youtube_video_id(str(youtube_url)) if youtube_url else None
+        essay_text_safe = essay_text.strip() if isinstance(essay_text, str) else None
 
         dirs = setup_user_directories(user_id)
         files_dir = dirs["files"]
@@ -54,6 +57,8 @@ class ParserService:
             results["file_task"] = ParserService._run_task_sync(parse_file_task, user_id, file_id_safe)
         if youtube_video_id:
             results["video_task"] = ParserService._run_task_sync(parse_video_task, user_id, youtube_video_id)
+        if essay_text_safe:
+            results["essay_task"] = ParserService._run_task_sync(parse_essay_task, user_id, essay_text_safe)
 
         success_count = sum(1 for item in results.values() if item.get("status") == "SUCCESS")
         failure_count = sum(1 for item in results.values() if item.get("status") == "FAILURE")
@@ -67,9 +72,11 @@ class ParserService:
             "github_username": github_username,
             "youtube_url": str(youtube_url) if youtube_url else None,
             "youtube_video_id": youtube_video_id,
+            "essay_text_provided": bool(essay_text_safe),
             "github_task_id": None,
             "file_task_id": None,
             "video_task_id": None,
+            "essay_task_id": None,
             "summary": {
                 "requested_tasks": len(results),
                 "success_count": success_count,

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict
 from fastapi import HTTPException
-import asyncio
+from urllib.parse import urlparse
 import httpx
 from core.config import SERVICES
 
@@ -18,19 +17,40 @@ class Pipeline:
     def __init__(self, service_url: str):
         self.service_url = service_url
 
-    async def send_request(
-        self, endpoint: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def send_request(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Send an async HTTP request to the service."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             try:
                 response = await client.post(
                     f"{self.service_url}/{endpoint}", json=payload
                 )
                 response.raise_for_status()
                 return response.json()
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Service {self.service_url}/{endpoint} returned {e.response.status_code}: {e.response.text[:300]}",
+                )
             except httpx.RequestError as e:
                 raise HTTPException(status_code=500, detail=f"Service request failed: {e}")
+
+
+def _service_base_url(url: str, port: int) -> str:
+    host = str(url).strip()
+    if host.startswith("http://"):
+        host_part = host[len("http://") :]
+        scheme = "http://"
+    elif host.startswith("https://"):
+        host_part = host[len("https://") :]
+        scheme = "https://"
+    else:
+        host_part = host
+        scheme = "http://"
+
+    if host_part == "0.0.0.0":
+        host_part = "127.0.0.1"
+
+    return f"{scheme}{host_part}:{int(port)}"
 
 
 class CandidateWorkflow:
@@ -42,7 +62,6 @@ class CandidateWorkflow:
         self.services = services
         self.bot_pipeline = Pipeline(services["bot"])
         self.scoring_pipeline = Pipeline(services["scoring"])
-        self.llm_pipeline = Pipeline(services["llm"])
         self.parser_pipeline = Pipeline(services["parser"])
 
     async def process_form_submission(self, form_data: Dict[str, Any]):
@@ -50,72 +69,56 @@ class CandidateWorkflow:
         Orchestrates the candidate workflow triggered by form submission.
         """
         candidate_id = form_data.get("candidate_id")
-        print(candidate_id)
-        # Step 1: Notify bot service
-        await self.bot_pipeline.send_request(
-            "send", {"candidate_id": candidate_id, "text": "Your application is under review.   Please wait for updates."}
+        tg_id = str(form_data.get("tg_id", "")).strip()
+        payload = form_data.get("data") if isinstance(form_data.get("data"), dict) else form_data
+        payload = payload if isinstance(payload, dict) else {}
+
+        essay_failure = payload.get(
+            "Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)",
+            "",
         )
+        essay_beta = payload.get(
+            'The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)',
+            "",
+        )
+        essay_text = "\n\n".join([str(x).strip() for x in [essay_failure, essay_beta] if str(x).strip()])
 
-        # Step 2: Extract and send data to respective services
-        activities = form_data.get("activities")
-        achievements = form_data.get("achievements")
-        essay = form_data.get("essay")
-        youtube_link = form_data.get("youtube_link")
+        youtube_url = ""
+        for key in ("Personal Presentation (Foundation)", "Personal Presentation (Undergraduate)"):
+            value = str(payload.get(key, "")).strip()
+            if value:
+                try:
+                    host = (urlparse(value).hostname or "").lower()
+                except Exception:
+                    host = ""
+                if "youtube.com" in host or "youtu.be" in host:
+                    youtube_url = value
+                    break
 
-        scoring_task = asyncio.create_task(
-            self.scoring_pipeline.send_request(
-                "process",
-                {"candidate_id": candidate_id, "activities": activities, "achievements": achievements},
+        parser_payload: Dict[str, Any] = {"user_id": str(candidate_id)}
+        if youtube_url:
+            parser_payload["youtube_url"] = youtube_url
+        if essay_text:
+            parser_payload["essay_text"] = essay_text
+
+        parser_result: Dict[str, Any] = {}
+        if len(parser_payload) > 1:
+            parser_result = await self.parser_pipeline.send_request("parse", parser_payload)
+
+        scoring_payload: Dict[str, Any] = {
+            "candidate_id": str(candidate_id),
+            "form_data": payload,
+        }
+        if parser_result:
+            scoring_payload["parser_context"] = parser_result
+
+        await self.scoring_pipeline.send_request("evaluate", scoring_payload)
+
+        if tg_id:
+            await self.bot_pipeline.send_request(
+                "notify",
+                {"tg_id": tg_id, "candidate_id": str(candidate_id)},
             )
-        )
-
-        llm_task = asyncio.create_task(
-            self.llm_pipeline.send_request(
-                "analyze-essay", {"candidate_id": candidate_id, "essay": essay}
-            )
-        )
-
-        parser_task = asyncio.create_task(
-            self.parser_pipeline.send_request(
-                "parse-video", {"candidate_id": candidate_id, "youtube_link": youtube_link}
-            )
-        )
-
-        # Wait for LLM and parser results
-        llm_result = await llm_task
-        parser_result = await parser_task
-
-        # Step 3: Send parser results to LLM for further analysis
-        llm_video_task = asyncio.create_task(
-            self.llm_pipeline.send_request(
-                "analyze-video",
-                {"candidate_id": candidate_id, "video_text": parser_result.get("text")},
-            )
-        )
-
-        # Step 4: Send LLM essay analysis to scoring service
-        scoring_essay_task = asyncio.create_task(
-            self.scoring_pipeline.send_request(
-                "review-essay",
-                {"candidate_id": candidate_id, "essay_analysis": llm_result},
-            )
-        )
-
-        # Wait for all tasks to complete
-        llm_video_result = await llm_video_task
-        scoring_essay_result = await scoring_essay_task
-        scoring_result = await scoring_task
-
-        # Step 5: Finalize candidate review and notify bot for live interview
-        await self.bot_pipeline.send_request(
-            "start-interview",
-            {
-                "candidate_id": candidate_id,
-                "scoring_result": scoring_result,
-                "essay_review": scoring_essay_result,
-                "video_analysis": llm_video_result,
-            },
-        )
 
 
 class Orchestrator:
@@ -123,13 +126,13 @@ class Orchestrator:
     Main orchestrator for handling workflows.
     """
 
-    def __init__(self):
-        # Extract service URLs from the SERVICES configuration
+    def __init__(self, services_config: Dict[str, Any] | None = None):
+        cfg = services_config or SERVICES
         self.workflow = CandidateWorkflow({
-            "bot": f"{SERVICES['bot-service']['url']}:{SERVICES['bot-service']['port']}",
-            "scoring": f"{SERVICES['scoring-service']['url']}:{SERVICES['scoring-service']['port']}",
-            "llm": f"{SERVICES['llm-service']['url']}:{SERVICES['llm-service']['port']}",
-            "parser": f"{SERVICES['parser-service']['url']}:{SERVICES['parser-service']['port']}",
+            "bot": _service_base_url(cfg["bot-service"]["url"], cfg["bot-service"]["port"]),
+            "scoring": _service_base_url(cfg["scoring-service"]["url"], cfg["scoring-service"]["port"]),
+            "llm": _service_base_url(cfg["llm-service"]["url"], cfg["llm-service"]["port"]),
+            "parser": _service_base_url(cfg["parser-service"]["url"], cfg["parser-service"]["port"]),
         })
 
     async def handle_form_submission(self, form_data: Dict[str, Any]):

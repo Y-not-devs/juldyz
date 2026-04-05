@@ -116,6 +116,10 @@ class Database:
             );
             """)
 
+    def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {str(row["name"]) for row in rows}
+
     # --- users ---
     def upsert_user(self, telegram_id: str) -> int:
         with self._connect() as conn:
@@ -133,6 +137,14 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE telegram_id=?", (telegram_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_candidate_id(self, candidate_id: str | int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE id=?",
+                (int(candidate_id),),
             ).fetchone()
         return dict(row) if row else None
 
@@ -177,42 +189,65 @@ class Database:
             "Please describe this activity, including what you accomplished and any recognition you received, etc.\n(Max characters: 150)"
         ]}
 
+        additional_info = {
+            "mobile_phone": payload.get("Mobile phone number"),
+            "instagram": payload.get("Instagram"),
+            "telegram_handle": payload.get("Telegram"),
+            "whatsapp": payload.get("WhatsApp"),
+            "essay_failure": payload.get(
+                "Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)"
+            ),
+            "essay_beta": payload.get(
+                'The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)'
+            ),
+            "honors_raw": honors,
+            "activities_raw": activities,
+        }
+
+        mapped = {
+            "user_id": user_id,
+            "timestamp": payload.get("timestamp"),
+            "email": payload.get("Email Address") or payload.get("email"),
+            "last_name": payload.get("Last Name"),
+            "first_name": payload.get("First Name"),
+            "patronymic": payload.get("Patronymic"),
+            "dob": payload.get("Date of Birth"),
+            "mobile_phone": payload.get("Mobile phone number"),
+            "instagram": payload.get("Instagram"),
+            "telegram_handle": payload.get("Telegram"),
+            "whatsapp": payload.get("WhatsApp"),
+            "program_applied": payload.get("  Which program are you applying for?  "),
+            "major": payload.get("Please specify your intended major:  "),
+            "personal_presentation": payload.get("Personal Presentation (Foundation)") or payload.get("Personal Presentation (Undergraduate)"),
+            "english_results": payload.get("English proficiency results (Foundation)") or payload.get("English proficiency results (Undergraduate)"),
+            "essay_failure": payload.get(
+                "Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)"
+            ),
+            "essay_beta": payload.get(
+                'The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)'
+            ),
+            "honors_raw": json.dumps(honors, ensure_ascii=False),
+            "activities_raw": json.dumps(activities, ensure_ascii=False),
+            "citizenship": payload.get("Citizenship") or "",
+            "iin": payload.get("IIN") or "",
+            "social_certificate": payload.get("If you want to upload its certificate. ")
+            or payload.get("Please submit the results of your English proficiency test")
+            or payload.get("Please submit the results of your English proficiency test (Foundation)")
+            or "",
+            "additional_info": json.dumps(additional_info, ensure_ascii=False),
+            "raw_payload": json.dumps(payload, ensure_ascii=False),
+        }
+
         with self._connect() as conn:
-            cur = conn.execute("""
-                INSERT INTO candidate_responses (
-                    user_id, email, last_name, first_name, patronymic, dob,
-                    mobile_phone, instagram, telegram_handle, whatsapp,
-                    program_applied, major, personal_presentation, english_results,
-                    essay_failure, essay_beta,
-                    honors_raw, activities_raw, raw_payload
-                ) VALUES (
-                    :user_id, :email, :last_name, :first_name, :patronymic, :dob,
-                    :mobile_phone, :instagram, :telegram_handle, :whatsapp,
-                    :program_applied, :major, :personal_presentation, :english_results,
-                    :essay_failure, :essay_beta,
-                    :honors_raw, :activities_raw, :raw_payload
-                )
-            """, {
-                "user_id":               user_id,
-                "email":                 payload.get("Email Address") or payload.get("email"),
-                "last_name":             payload.get("Last Name"),
-                "first_name":            payload.get("First Name"),
-                "patronymic":            payload.get("Patronymic"),
-                "dob":                   payload.get("Date of Birth"),
-                "mobile_phone":          payload.get("Mobile phone number"),
-                "instagram":             payload.get("Instagram"),
-                "telegram_handle":       payload.get("Telegram"),
-                "whatsapp":              payload.get("WhatsApp"),
-                "program_applied":       payload.get("  Which program are you applying for?  "),
-                "major":                 payload.get("Please specify your intended major:  "),
-                "personal_presentation": payload.get("Personal Presentation (Foundation)") or payload.get("Personal Presentation (Undergraduate)"),
-                "english_results":       payload.get("English proficiency results (Foundation)") or payload.get("English proficiency results (Undergraduate)"),
-                "essay_failure":         payload.get("Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)"),
-                "essay_beta":            payload.get('The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)'),
-                "honors_raw":            json.dumps(honors, ensure_ascii=False),
-                "activities_raw":        json.dumps(activities, ensure_ascii=False),
-                "raw_payload":           json.dumps(payload, ensure_ascii=False),
-            })
+            columns = self._table_columns(conn, "candidate_responses")
+            insert_data = {key: value for key, value in mapped.items() if key in columns}
+            if "user_id" not in insert_data:
+                raise sqlite3.OperationalError("candidate_responses table must include user_id column")
+
+            column_names = ", ".join(insert_data.keys())
+            value_names = ", ".join(f":{key}" for key in insert_data.keys())
+            query = f"INSERT INTO candidate_responses ({column_names}) VALUES ({value_names})"
+            cur = conn.execute(query, insert_data)
             return cur.lastrowid
 
     def get_candidate_response(self, user_id: int) -> dict | None:
