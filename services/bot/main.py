@@ -29,9 +29,9 @@ async def lifespan(app: FastAPI):
 api = FastAPI(lifespan=lifespan)
 router = APIRouter(tags=["bot-service"])
 
-@router.post("/notify")
-async def notify(data: NotifyRequest):
-    await bot_service.notify_user(data.tg_id)
+@router.post("/send")
+async def notify(candidate_id: str, text: str):
+    await bot_service.send_message(candidate_id, text)
     return {"status": "ok"}
 
 @router.get("/health")

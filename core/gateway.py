@@ -78,7 +78,7 @@ signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
 
 # Initialize the orchestrator
-orchestrator = Orchestrator(SERVICES)
+orchestrator = Orchestrator()
 
 
 @asynccontextmanager

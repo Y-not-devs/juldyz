@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import SERVICES
 from core.logger import setup_logging
+from core.orchestrator import Orchestrator
 from services.form.service import FormService
 from services.form.schemas.payload import FormSubmitRequest, FormSubmitResponse
 
@@ -12,7 +13,7 @@ setup_logging(SERVICES['form-service']['prefix'])
 
 api = FastAPI(title=f"{SERVICES['form-service']['prefix']} API")
 router = APIRouter(tags=["form-service"])
-
+orchestrator = Orchestrator()
 # --- Routes ---
 @router.post("/form-submit", response_model=FormSubmitResponse)
 async def form_submit(payload: FormSubmitRequest):
@@ -30,7 +31,7 @@ async def form_submit(payload: FormSubmitRequest):
     raw = payload.model_dump()
     candidate_id = candidate["id"]
     FormService.save_response(candidate_id, raw)
-
+    await orchestrator.handle_form_submission(raw)
     print(f"[FORM] saved candidate_id={candidate_id} tg_id={tg_id}")
     return {"status": "ok", "candidate_id": str(candidate_id)}
 

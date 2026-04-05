@@ -45,8 +45,6 @@ def _fetch_candidates(limit: int = 50) -> list[dict[str, Any]]:
         r.major,
         r.personal_presentation,
         r.english_results,
-        r.social_certificate,
-        r.additional_info,
         r.raw_payload,
         s.total AS total_score,
         s.motivation,

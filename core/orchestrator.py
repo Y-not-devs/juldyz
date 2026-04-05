@@ -7,7 +7,8 @@ import asyncio
 import httpx
 from core.config import SERVICES
 
-
+from core.logger import setup_logging
+setup_logging("orchestrator")
 class Pipeline:
     """
     Represents a pipeline step for processing candidate data.
@@ -49,10 +50,10 @@ class CandidateWorkflow:
         Orchestrates the candidate workflow triggered by form submission.
         """
         candidate_id = form_data.get("candidate_id")
-
+        print(candidate_id)
         # Step 1: Notify bot service
         await self.bot_pipeline.send_request(
-            "notify", {"candidate_id": candidate_id, "status": "Under Review"}
+            "send", {"candidate_id": candidate_id, "text": "Your application is under review.   Please wait for updates."}
         )
 
         # Step 2: Extract and send data to respective services
