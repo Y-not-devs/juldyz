@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core.config import GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL, SERVICES
@@ -77,8 +77,8 @@ def handle_exit(sig: int, frame: Any) -> None:
 signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
 
-
-orchestrator = Orchestrator()
+# Initialize the orchestrator
+orchestrator = Orchestrator(SERVICES)
 
 
 @asynccontextmanager
@@ -136,6 +136,15 @@ async def _proxy(service: str, path: str, request: Request):
 @app.api_route("/api/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def api_proxy(service: str, path: str, request: Request):
     return await _proxy(service, path, request)
+
+@app.post("/form-submit")
+async def form_submit(request: Request):
+    try:
+        form_data = await request.json()
+        await orchestrator.handle_form_submission(form_data)
+        return {"status": "success", "message": "Form submission processed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health():

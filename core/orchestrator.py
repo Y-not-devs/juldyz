@@ -5,6 +5,7 @@ from typing import Any, Dict
 from fastapi import HTTPException
 import asyncio
 import httpx
+from core.config import SERVICES
 
 
 class Pipeline:
@@ -121,8 +122,14 @@ class Orchestrator:
     Main orchestrator for handling workflows.
     """
 
-    def __init__(self, services: Dict[str, str]):
-        self.workflow = CandidateWorkflow(services)
+    def __init__(self):
+        # Extract service URLs from the SERVICES configuration
+        self.workflow = CandidateWorkflow({
+            "bot": f"{SERVICES['bot-service']['url']}:{SERVICES['bot-service']['port']}",
+            "scoring": f"{SERVICES['scoring-service']['url']}:{SERVICES['scoring-service']['port']}",
+            "llm": f"{SERVICES['llm-service']['url']}:{SERVICES['llm-service']['port']}",
+            "parser": f"{SERVICES['parser-service']['url']}:{SERVICES['parser-service']['port']}",
+        })
 
     async def handle_form_submission(self, form_data: Dict[str, Any]):
         """
