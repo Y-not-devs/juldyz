@@ -7,6 +7,7 @@ celery = Celery(
     backend=CELERY_RESULT_BACKEND,
     include=[
         "services.parser.tasks",
+        "services.parser.tasks_video",
         "services.llm.tasks",
     ],
 )

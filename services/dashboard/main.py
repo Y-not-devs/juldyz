@@ -1,5 +1,5 @@
-
 import requests 
+import streamlit as st
 from fastapi import FastAPI, APIRouter
 
 from core.logger import setup_logging
