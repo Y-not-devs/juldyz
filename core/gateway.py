@@ -15,42 +15,25 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from core.clients import BotClient, FormClient, ParserClient, ScoringClient
 from core.config import GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL, SERVICES
-from core.events import SystemEvent
 from core.logger import setup_logging
-from core.orchestrator import Orchestrator, PipelineRegistry
-from core.pipelines import CandidatePipeline
+from core.orchestrator import Orchestrator
 
-from services.bot.main import router as bot_router
-from services.llm.main import router as llm_router
-from services.form.main import router as form_router
-from services.parser.main import router as parser_router
-from services.scoring.main import router as scoring_router
-from services.dashboard.main import router as dashboard_router
-setup_logging("gateway")
+from services import bot_router, scoring_router, llm_router, form_router, parser_router, dashboard_router
+
 
 ROOT = Path(__file__).parent.parent
-_processes: dict[str, subprocess.Popen] = {}
-INTERNAL_FASTAPI_SERVICES = {
-    "form-service",
-    "bot-service",
-    "scoring-service",
-    "parser-service",
-    "llm-service",
-}
+setup_logging("gateway")
 
+_processes: dict[str, subprocess.Popen] = {}
 
 def _service_app_key(service_name: str) -> str:
     module_path = SERVICES[service_name]["script"].replace("\\", "/").replace("/", ".")
     module_name = module_path.removesuffix(".py")
     return f"{module_name}:api"
 
-
 def start_services() -> None:
     for name, cfg in SERVICES.items():
-        if name not in INTERNAL_FASTAPI_SERVICES:
-            continue
         app_path = _service_app_key(name)
         host = cfg["url"].replace("http://", "").replace("https://", "")
         port = cfg["port"]
@@ -94,18 +77,8 @@ def handle_exit(sig: int, frame: Any) -> None:
 signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
 
-form_client = FormClient()
-parser_client = ParserClient()
-scoring_client = ScoringClient()
-bot_client = BotClient()
-candidate_pipeline = CandidatePipeline(
-    parser_client=parser_client,
-    scoring_client=scoring_client,
-    bot_client=bot_client,
-)
-orchestrator = Orchestrator(
-    pipelines=PipelineRegistry(candidate=candidate_pipeline),
-)
+
+orchestrator = Orchestrator()
 
 
 @asynccontextmanager
@@ -119,16 +92,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
 
-
 app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
 app.include_router(llm_router, prefix=f"/{SERVICES['llm-service']['prefix']}")
 app.include_router(form_router, prefix=f"/{SERVICES['form-service']['prefix']}")
 app.include_router(parser_router, prefix=f"/{SERVICES['parser-service']['prefix']}")
 app.include_router(scoring_router, prefix=f"/{SERVICES['scoring-service']['prefix']}")
 app.include_router(dashboard_router, prefix=f"/{SERVICES['dashboard-service']['prefix']}")
-# =====================================================
-# INTERNAL PROXY
-# =====================================================
+
 async def _proxy(service: str, path: str, request: Request):
     cfg = SERVICES.get(service)
     if not cfg:
@@ -163,55 +133,9 @@ async def _proxy(service: str, path: str, request: Request):
 
     return JSONResponse(status_code=response.status_code, content=content)
 
-
-@app.post("/form-submit")
-async def form_submit(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"status": "error", "detail": "Invalid JSON payload"}, status_code=400)
-
-    try:
-        form_result = await form_client.submit_form(payload)
-    except RuntimeError as exc:
-        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=502)
-
-    if form_result.get("status") != "ok":
-        return JSONResponse(form_result, status_code=400)
-
-    event = SystemEvent(
-        type="form_completed",
-        payload={
-            "candidate_id": form_result.get("candidate_id"),
-            "form_payload": {
-                **payload.get("data", {}),
-                "tg_id": payload.get("tg_id"),
-            },
-        },
-    )
-    try:
-        workflow_result = await orchestrator.handle_event(event)
-    except Exception as exc:
-        return JSONResponse(
-            {
-                "status": "partial_success",
-                "form": form_result,
-                "workflow_error": str(exc),
-            },
-            status_code=202,
-        )
-
-    return {
-        "status": "ok",
-        "form": form_result,
-        "workflow": workflow_result,
-    }
-
-
 @app.api_route("/api/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def api_proxy(service: str, path: str, request: Request):
     return await _proxy(service, path, request)
-
 
 @app.get("/health")
 async def health():
@@ -226,7 +150,6 @@ async def health():
             }
         )
     return {"gateway": "ok", "services": status}
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level=LOG_LEVEL)
