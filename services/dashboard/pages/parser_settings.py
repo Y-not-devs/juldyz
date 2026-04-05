@@ -1,83 +1,65 @@
-import os
+﻿from __future__ import annotations
 
 import httpx
 import streamlit as st
 
-DEFAULT_API_BASE_URL = os.getenv("JULDYZ_API_BASE_URL", "http://localhost:8000")
-DEFAULT_PARSER_PREFIX = os.getenv("JULDYZ_PARSER_PREFIX", "parser-service")
+from core.dashboard_config import ensure_session_settings, load_dashboard_settings
 
 st.set_page_config(
     page_title="Parser Settings",
-    page_icon=":mag_right:",
+    page_icon=":mag:",
     layout="wide",
 )
 
+ensure_session_settings(st.session_state, load_dashboard_settings())
 
-def post_parse(base_url: str, prefix: str, payload: dict) -> tuple[bool, dict | str]:
+
+def call_parser(base_url: str, prefix: str, payload: dict) -> tuple[bool, dict | str]:
     url = f"{base_url.rstrip('/')}/{prefix.strip('/')}/parse"
     try:
-        with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=45.0) as client:
             resp = client.post(url, json=payload)
         if resp.status_code >= 400:
             try:
-                data = resp.json()
+                return False, resp.json()
             except Exception:
-                data = resp.text
-            return False, data
+                return False, resp.text
         return True, resp.json() if resp.content else {}
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def get_task_status(base_url: str, prefix: str, task_id: str) -> tuple[bool, dict | str]:
-    url = f"{base_url.rstrip('/')}/{prefix.strip('/')}/parse/tasks/{task_id}"
-    try:
-        with httpx.Client(timeout=8.0) as client:
-            resp = client.get(url)
-        if resp.status_code >= 400:
-            try:
-                data = resp.json()
-            except Exception:
-                data = resp.text
-            return False, data
-        return True, resp.json() if resp.content else {}
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-
-
-if "api_base_url" not in st.session_state:
-    st.session_state.api_base_url = DEFAULT_API_BASE_URL
-if "parser_prefix" not in st.session_state:
-    st.session_state.parser_prefix = DEFAULT_PARSER_PREFIX
 if "last_parser_response" not in st.session_state:
-    st.session_state.last_parser_response = {}
+    st.session_state["last_parser_response"] = {}
 
 st.title("Parser Settings")
-st.caption("Запуск задач парсинга по GitHub и/или PDF (file_id).")
+st.caption("Run parser tasks in direct mode for GitHub, PDF, and YouTube.")
 
 with st.sidebar:
     st.subheader("Parser API")
-    st.session_state.api_base_url = st.text_input(
+    st.session_state["api_base_url"] = st.text_input(
         "API Base URL",
-        value=st.session_state.api_base_url,
-        help="Обычно http://localhost:8000 для gateway",
-    ).strip() or DEFAULT_API_BASE_URL
-    st.session_state.parser_prefix = st.text_input(
+        value=str(st.session_state["api_base_url"]),
+    ).strip() or "http://localhost:8000"
+    st.session_state["parser_prefix"] = st.text_input(
         "Parser Prefix",
-        value=st.session_state.parser_prefix,
-        help="Обычно parser-service",
-    ).strip() or DEFAULT_PARSER_PREFIX
+        value=str(st.session_state["parser_prefix"]),
+    ).strip() or "parser-service"
 
 left_col, right_col = st.columns([2, 1])
 
 with left_col:
     st.subheader("Run Parse")
-    with st.form("parse_form"):
+    with st.form("parser_form"):
         user_id = st.text_input("user_id", placeholder="candidate_001")
         file_id = st.text_input("file_id (optional)", placeholder="resume_001")
         github_url = st.text_input(
             "github_url (optional)",
             placeholder="https://github.com/username",
+        )
+        youtube_url = st.text_input(
+            "youtube_url (optional)",
+            placeholder="https://www.youtube.com/watch?v=...",
         )
         submitted = st.form_submit_button("Start Parsing", use_container_width=True)
 
@@ -87,56 +69,59 @@ with left_col:
             payload["file_id"] = file_id.strip()
         if github_url.strip():
             payload["github_url"] = github_url.strip()
+        if youtube_url.strip():
+            payload["youtube_url"] = youtube_url.strip()
 
         if not payload.get("user_id"):
-            st.error("Поле user_id обязательно.")
-        elif not payload.get("file_id") and not payload.get("github_url"):
-            st.error("Укажи хотя бы file_id или github_url.")
+            st.error("user_id is required.")
+        elif not any(payload.get(key) for key in ("file_id", "github_url", "youtube_url")):
+            st.error("Provide at least one of: file_id, github_url, youtube_url.")
         else:
-            ok, result = post_parse(
-                st.session_state.api_base_url,
-                st.session_state.parser_prefix,
+            ok, result = call_parser(
+                st.session_state["api_base_url"],
+                st.session_state["parser_prefix"],
                 payload,
             )
-            if ok:
-                st.success("Задачи парсинга отправлены.")
-                st.session_state.last_parser_response = result if isinstance(result, dict) else {}
-                st.json(result)
+            if ok and isinstance(result, dict):
+                st.session_state["last_parser_response"] = result
+                summary = result.get("summary", {})
+                success_count = int(summary.get("success_count", 0))
+                failure_count = int(summary.get("failure_count", 0))
+                st.success("Parser run completed.")
+                metric1, metric2 = st.columns(2)
+                with metric1:
+                    st.metric("Success Tasks", success_count)
+                with metric2:
+                    st.metric("Failed Tasks", failure_count)
+            elif ok:
+                st.success("Parser run completed.")
+                st.session_state["last_parser_response"] = {"raw_response": result}
             else:
-                st.error("Ошибка при запуске parser.")
-                st.json(result)
+                st.error("Parser request failed.")
+                st.session_state["last_parser_response"] = {"error": result}
 
 with right_col:
-    st.subheader("Track Task")
+    st.subheader("Last Result")
+    last = st.session_state["last_parser_response"]
+    if not last:
+        st.info("No parser run yet.")
+    else:
+        if isinstance(last, dict):
+            mode = last.get("mode")
+            status = last.get("status")
+            if mode:
+                st.caption(f"mode: {mode}")
+            if status:
+                st.caption(f"status: {status}")
+            if isinstance(last.get("results"), dict):
+                for task_name, task_payload in last["results"].items():
+                    task_status = str(task_payload.get("status", "unknown"))
+                    if task_status == "SUCCESS":
+                        st.success(f"{task_name}: {task_status}")
+                    else:
+                        st.error(f"{task_name}: {task_status}")
+        st.json(last)
 
-    default_task_id = ""
-    last = st.session_state.last_parser_response
-    if isinstance(last, dict):
-        default_task_id = (
-            last.get("github_task_id")
-            or last.get("file_task_id")
-            or ""
-        )
+st.markdown("---")
+st.caption("Parser is configured in direct mode. No queued task_id tracking is required.")
 
-    task_id = st.text_input("task_id", value=default_task_id)
-    if st.button("Check Status", use_container_width=True):
-        if not task_id.strip():
-            st.warning("Введи task_id.")
-        else:
-            ok, result = get_task_status(
-                st.session_state.api_base_url,
-                st.session_state.parser_prefix,
-                task_id.strip(),
-            )
-            if ok:
-                status = result.get("status", "unknown") if isinstance(result, dict) else "unknown"
-                if status in {"SUCCESS"}:
-                    st.success(f"Task status: {status}")
-                elif status in {"FAILURE"}:
-                    st.error(f"Task status: {status}")
-                else:
-                    st.info(f"Task status: {status}")
-                st.json(result)
-            else:
-                st.error("Не удалось получить статус задачи.")
-                st.json(result)
