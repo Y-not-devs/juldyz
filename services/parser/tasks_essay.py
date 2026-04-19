@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 import re
 from typing import Any
 
 import httpx
 
-from core.config import SERVICES
+from core.config import LLM_GENERATE_TIMEOUT_SECONDS, SERVICES
+from core.network import build_service_base_url
 from services.parser.storage import setup_user_directories, write_json_file
 from services.parser.validation import ensure_safe_identifier
 
@@ -20,11 +22,7 @@ def _utc_now_iso() -> str:
 
 def _build_llm_url() -> str:
     cfg = SERVICES["llm-service"]
-    base = str(cfg["url"]).rstrip("/")
-    if base.startswith("http://0.0.0.0"):
-        base = base.replace("http://0.0.0.0", "http://127.0.0.1", 1)
-    port = int(cfg["port"])
-    return f"{base}:{port}/generate"
+    return f"{build_service_base_url(cfg['url'], cfg['port'])}/generate"
 
 
 def _extract_json_candidate(text: str) -> str | None:
@@ -71,7 +69,7 @@ def parse_essay_task(user_id: str, essay_text: str) -> dict:
     llm_payload = {"instruction": instruction, "text": essay}
 
     llm_url = _build_llm_url()
-    with httpx.Client(timeout=90.0) as client:
+    with httpx.Client(timeout=LLM_GENERATE_TIMEOUT_SECONDS) as client:
         resp = client.post(llm_url, json=llm_payload)
     if resp.status_code >= 400:
         raise RuntimeError(f"LLM HTTP {resp.status_code}: {resp.text[:300]}")
@@ -94,6 +92,7 @@ def parse_essay_task(user_id: str, essay_text: str) -> dict:
         "status": "analyzed",
         "user_id": safe_user_id,
         "essay_char_count": len(essay),
+        "essay_sha256": hashlib.sha256(essay.encode("utf-8")).hexdigest(),
         "updated_at": _utc_now_iso(),
         "llm": {
             "url": llm_url,

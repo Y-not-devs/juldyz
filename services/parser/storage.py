@@ -27,3 +27,14 @@ def write_json_file(path: Path, payload: Any) -> None:
     with path.open("w", encoding="utf-8") as output_file:
         json.dump(payload, output_file, indent=4, ensure_ascii=False)
 
+
+def read_json_file(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as input_file:
+        return json.load(input_file)
+
+
+def write_binary_file(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as output_file:
+        output_file.write(content)
+

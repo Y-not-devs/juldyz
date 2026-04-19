@@ -1,11 +1,13 @@
 import asyncio
 import uvicorn
+from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, APIRouter
 from celery.result import AsyncResult
 
 from core.logger import setup_logging
 from core.config import SERVICES
 from core.db import db
+from core.network import normalize_bind_host
 
 from services.llm.service import LLM_Service
 from services.llm.schemas.base import LLMGenerateRequest, LLMGenerateResponse, LLMTaskStatusResponse
@@ -52,7 +54,7 @@ async def generate_text(prompt: dict):
 
         # Queue the task
         prompt_text = f"{instruction}: {text}"
-        response = llm_service.generate_response(prompt_text)
+        response = await run_in_threadpool(llm_service.generate_response, prompt_text)
         return {"response": response}
     except Exception as e:
         return {"error": str(e)}
@@ -64,7 +66,7 @@ async def main():
     cfg = SERVICES['llm-service']
     config = uvicorn.Config(
         api,
-        host=cfg['url'],
+        host=normalize_bind_host(str(cfg['url'])),
         port=cfg['port'],
         log_level=cfg['log_level']
     )

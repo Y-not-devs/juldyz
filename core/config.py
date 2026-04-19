@@ -4,6 +4,26 @@ import os
 # Load environment variables from a .env file
 load_dotenv()
 
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
 # Telegram Bot Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -61,11 +81,47 @@ SERVICES = {
 # Google Form URL
 GOOGLE_FORM_URL = os.getenv("GOOGLE_FORM_URL")
 QUESTION_FIELD_ID = os.getenv("QUESTION_FIELD_ID")
+
+# Google Drive download support for private file-upload links from Google Forms.
+GOOGLE_DRIVE_BEARER_TOKEN = os.getenv("GOOGLE_DRIVE_BEARER_TOKEN")
+GOOGLE_DRIVE_COOKIE = os.getenv("GOOGLE_DRIVE_COOKIE")
+GOOGLE_DRIVE_DOWNLOAD_TIMEOUT_SECONDS = _float_env("GOOGLE_DRIVE_DOWNLOAD_TIMEOUT_SECONDS", 90.0)
                               
 # Gateway Configuration
 GATEWAY_HOST = os.getenv("GATEWAY_HOST", "0.0.0.0")
 GATEWAY_PORT = int(os.getenv("GATEWAY_PORT", 8000))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info")
+
+# Shared HTTP timeout policy.
+HTTP_CONNECT_TIMEOUT_SECONDS = _float_env("HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)
+HTTP_WRITE_TIMEOUT_SECONDS = _float_env("HTTP_WRITE_TIMEOUT_SECONDS", 30.0)
+HTTP_POOL_TIMEOUT_SECONDS = _float_env("HTTP_POOL_TIMEOUT_SECONDS", 10.0)
+
+# Upstream read budgets are intentionally service-specific.
+# Parser can include PDF download, GitHub fetch, YouTube transcript/Whisper, and essay LLM analysis.
+ORCHESTRATOR_SERVICE_READ_TIMEOUT_SECONDS = {
+    "bot-service": _float_env("ORCHESTRATOR_BOT_READ_TIMEOUT_SECONDS", 20.0),
+    "scoring-service": _float_env("ORCHESTRATOR_SCORING_READ_TIMEOUT_SECONDS", 60.0),
+    "parser-service": _float_env("ORCHESTRATOR_PARSER_READ_TIMEOUT_SECONDS", 420.0),
+}
+
+GATEWAY_PROXY_READ_TIMEOUT_SECONDS = {
+    "form-service": _float_env("GATEWAY_FORM_READ_TIMEOUT_SECONDS", 30.0),
+    "bot-service": _float_env("GATEWAY_BOT_READ_TIMEOUT_SECONDS", 20.0),
+    "scoring-service": _float_env("GATEWAY_SCORING_READ_TIMEOUT_SECONDS", 60.0),
+    "parser-service": _float_env("GATEWAY_PARSER_READ_TIMEOUT_SECONDS", 420.0),
+    "llm-service": _float_env("GATEWAY_LLM_READ_TIMEOUT_SECONDS", 240.0),
+    "dashboard-service": _float_env("GATEWAY_DASHBOARD_READ_TIMEOUT_SECONDS", 30.0),
+}
+
+DASHBOARD_REQUEST_TIMEOUT_SECONDS = {
+    "bot": _float_env("DASHBOARD_BOT_TIMEOUT_SECONDS", GATEWAY_PROXY_READ_TIMEOUT_SECONDS["bot-service"]),
+    "parser": _float_env("DASHBOARD_PARSER_TIMEOUT_SECONDS", GATEWAY_PROXY_READ_TIMEOUT_SECONDS["parser-service"]),
+    "scoring": _float_env("DASHBOARD_SCORING_TIMEOUT_SECONDS", GATEWAY_PROXY_READ_TIMEOUT_SECONDS["scoring-service"]),
+}
+
+LLM_GENERATE_TIMEOUT_SECONDS = _float_env("LLM_GENERATE_TIMEOUT_SECONDS", 180.0)
+FORM_WORKFLOW_MAX_CONCURRENT_JOBS = max(1, _int_env("FORM_WORKFLOW_MAX_CONCURRENT_JOBS", 4))
 
 # Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

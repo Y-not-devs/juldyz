@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import uvicorn
 from core.db import db
 from core.config import TELEGRAM_TOKEN, GOOGLE_FORM_URL, QUESTION_FIELD_ID, SERVICES
+from core.network import normalize_bind_host
 from services.bot.service import BotService
 from services.bot.schemas.notify import NotifyRequest
 
@@ -55,4 +56,9 @@ api.include_router(router)
 
 if __name__ == "__main__":
     cfg = SERVICES['bot-service']
-    uvicorn.run(api, host=cfg['url'], port=cfg['port'], log_level=cfg['log_level'])
+    uvicorn.run(
+        api,
+        host=normalize_bind_host(str(cfg['url'])),
+        port=cfg['port'],
+        log_level=cfg['log_level'],
+    )

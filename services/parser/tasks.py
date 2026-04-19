@@ -1,19 +1,37 @@
 from datetime import UTC, datetime
 from pathlib import Path
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from pypdf import PdfReader
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential_jitter,
-)
+try:
+    from tenacity import (
+        retry,
+        retry_if_exception_type,
+        stop_after_attempt,
+        wait_exponential_jitter,
+    )
+except ImportError:  # pragma: no cover - environment-specific fallback
+    def retry(*args, **kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def retry_if_exception_type(*args, **kwargs):
+        return None
+
+    def stop_after_attempt(*args, **kwargs):
+        return None
+
+    def wait_exponential_jitter(*args, **kwargs):
+        return None
 
 from services.parser.storage import setup_user_directories, write_json_file
 from services.parser.validation import ensure_safe_identifier, normalize_github_username
+
+if TYPE_CHECKING:
+    from pypdf import PdfReader
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:(?:\+|00)\d[\d\s().-]{7,}\d|\b\d[\d\s().-]{8,}\d\b)")
@@ -197,7 +215,21 @@ def _extract_candidate_profile(pages: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _serialize_pdf_metadata(pdf_reader: PdfReader) -> dict[str, Any]:
+def _summarize_github_profile(profile_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "login": profile_data.get("login"),
+        "name": profile_data.get("name"),
+        "public_repos": int(profile_data.get("public_repos") or 0),
+        "followers": int(profile_data.get("followers") or 0),
+        "following": int(profile_data.get("following") or 0),
+        "has_bio": bool(str(profile_data.get("bio") or "").strip()),
+        "has_blog": bool(str(profile_data.get("blog") or "").strip()),
+        "has_company": bool(str(profile_data.get("company") or "").strip()),
+        "location": profile_data.get("location"),
+    }
+
+
+def _serialize_pdf_metadata(pdf_reader: "PdfReader") -> dict[str, Any]:
     metadata = pdf_reader.metadata or {}
     serialized: dict[str, Any] = {}
     for key, value in metadata.items():
@@ -210,6 +242,8 @@ def _serialize_pdf_metadata(pdf_reader: PdfReader) -> dict[str, Any]:
 
 
 def _extract_pdf_payload(pdf_path: Path) -> dict[str, Any]:
+    from pypdf import PdfReader
+
     pdf_reader = PdfReader(str(pdf_path))
 
     if pdf_reader.is_encrypted and pdf_reader.decrypt("") == 0:
@@ -314,6 +348,7 @@ def parse_github_task(user_id: str, github_username: str) -> dict:
         "user_id": safe_user_id,
         "github_username": safe_username,
         "github_id": github_id,
+        "profile_summary": _summarize_github_profile(profile_data),
         "output_path": str(output_path),
         "source_status_code": profile_data.get("status", 200),
         "finished_at": _utc_now_iso(),
@@ -346,6 +381,8 @@ def parse_file_task(user_id: str, file_id: str) -> dict:
         "status": "success",
         "user_id": safe_user_id,
         "file_id": safe_file_id,
+        "pdf_summary": extracted_pdf["summary"],
+        "extracted_profile": extracted_profile,
         "output_path": str(processed_path),
         "page_count": extracted_pdf["summary"]["page_count"],
         "total_char_count": extracted_pdf["summary"]["total_char_count"],

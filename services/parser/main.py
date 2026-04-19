@@ -1,11 +1,13 @@
 import asyncio
 import uvicorn
+from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 from typing import Optional
 
 from core.logger import setup_logging
 from core.config import SERVICES
+from core.network import normalize_bind_host
 from services.parser.service import ParserService
 
 setup_logging(SERVICES['parser-service']['prefix'])
@@ -19,6 +21,7 @@ parser_service = ParserService()
 class ParseRequest(BaseModel):
     user_id: str
     file_id: Optional[str] = None
+    file_url: Optional[HttpUrl] = None
     github_url: Optional[HttpUrl] = None
     youtube_url: Optional[HttpUrl] = None
     essay_text: Optional[str] = None
@@ -26,16 +29,18 @@ class ParseRequest(BaseModel):
 
 @router.post("/parse")
 async def start_parsing(request: ParseRequest):
-    if not request.file_id and not request.github_url and not request.youtube_url and not request.essay_text:
+    if not request.file_id and not request.file_url and not request.github_url and not request.youtube_url and not request.essay_text:
         raise HTTPException(
             status_code=422,
-            detail="Provide file_id and/or github_url and/or youtube_url and/or essay_text",
+            detail="Provide file_id and/or file_url and/or github_url and/or youtube_url and/or essay_text",
         )
 
     try:
-        return parser_service.queue_tasks(
+        return await run_in_threadpool(
+            parser_service.queue_tasks,
             user_id=request.user_id,
             file_id=request.file_id,
+            file_url=request.file_url,
             github_url=request.github_url,
             youtube_url=request.youtube_url,
             essay_text=request.essay_text,
@@ -67,7 +72,7 @@ async def main():
     cfg = SERVICES['parser-service']
     config = uvicorn.Config(
         api,
-        host=cfg['url'],
+        host=normalize_bind_host(str(cfg['url'])),
         port=cfg['port'],
         log_level=cfg['log_level']
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import subprocess
@@ -12,30 +13,56 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from core.config import GATEWAY_HOST, GATEWAY_PORT, LOG_LEVEL, SERVICES
+from core.config import (
+    GATEWAY_HOST,
+    GATEWAY_PORT,
+    GATEWAY_PROXY_READ_TIMEOUT_SECONDS,
+    HTTP_CONNECT_TIMEOUT_SECONDS,
+    HTTP_POOL_TIMEOUT_SECONDS,
+    HTTP_WRITE_TIMEOUT_SECONDS,
+    LOG_LEVEL,
+    SERVICES,
+)
 from core.logger import setup_logging
-from core.orchestrator import Orchestrator
-
-from services import bot_router, scoring_router, llm_router, form_router, parser_router, dashboard_router
+from core.network import build_service_base_url, normalize_bind_host
 
 
 ROOT = Path(__file__).parent.parent
 setup_logging("gateway")
+logger = logging.getLogger(__name__)
 
 _processes: dict[str, subprocess.Popen] = {}
+SERVICE_PREFIX_MAP = {str(cfg["prefix"]): name for name, cfg in SERVICES.items()}
+
 
 def _service_app_key(service_name: str) -> str:
     module_path = SERVICES[service_name]["script"].replace("\\", "/").replace("/", ".")
     module_name = module_path.removesuffix(".py")
     return f"{module_name}:api"
 
+
+def _service_proxy_url(service_name: str, path: str) -> str:
+    cfg = SERVICES[service_name]
+    return f"{build_service_base_url(cfg['url'], cfg['port'])}/{path}"
+
+
+def _proxy_timeout(service_name: str) -> httpx.Timeout:
+    read_timeout = float(GATEWAY_PROXY_READ_TIMEOUT_SECONDS.get(service_name, 30.0))
+    return httpx.Timeout(
+        connect=HTTP_CONNECT_TIMEOUT_SECONDS,
+        read=read_timeout,
+        write=HTTP_WRITE_TIMEOUT_SECONDS,
+        pool=HTTP_POOL_TIMEOUT_SECONDS,
+    )
+
+
 def start_services() -> None:
     for name, cfg in SERVICES.items():
         app_path = _service_app_key(name)
-        host = cfg["url"].replace("http://", "").replace("https://", "")
+        host = normalize_bind_host(str(cfg["url"]))
         port = cfg["port"]
         log_level = cfg["log_level"]
         print(f"[GATEWAY] starting {name} on {host}:{port}")
@@ -77,9 +104,6 @@ def handle_exit(sig: int, frame: Any) -> None:
 signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
 
-# Initialize the orchestrator
-orchestrator = Orchestrator()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -92,24 +116,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="juldyz-gateway", lifespan=lifespan)
 
-app.include_router(bot_router, prefix=f"/{SERVICES['bot-service']['prefix']}")
-app.include_router(llm_router, prefix=f"/{SERVICES['llm-service']['prefix']}")
-app.include_router(form_router, prefix=f"/{SERVICES['form-service']['prefix']}")
-app.include_router(parser_router, prefix=f"/{SERVICES['parser-service']['prefix']}")
-app.include_router(scoring_router, prefix=f"/{SERVICES['scoring-service']['prefix']}")
-app.include_router(dashboard_router, prefix=f"/{SERVICES['dashboard-service']['prefix']}")
 
 async def _proxy(service: str, path: str, request: Request):
     cfg = SERVICES.get(service)
     if not cfg:
         return JSONResponse({"error": f"unknown service '{service}'"}, status_code=404)
 
-    url = f"{cfg['url']}:{cfg['port']}/{path}"
+    url = _service_proxy_url(service, path)
     body = await request.body()
     headers = {"Content-Type": request.headers.get("Content-Type", "application/json")}
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=_proxy_timeout(service)) as client:
             response = await client.request(
                 method=request.method,
                 url=url,
@@ -117,9 +135,40 @@ async def _proxy(service: str, path: str, request: Request):
                 headers=headers,
             )
     except httpx.ConnectError:
+        logger.exception(
+            "Gateway upstream connect failed service=%s method=%s path=%s url=%s",
+            service,
+            request.method,
+            path,
+            url,
+        )
         return JSONResponse({"status": "error", "detail": f"{service} is not reachable"}, status_code=502)
-    except httpx.TimeoutException:
-        return JSONResponse({"status": "error", "detail": f"{service} timed out"}, status_code=504)
+    except httpx.TimeoutException as exc:
+        logger.exception(
+            "Gateway upstream timeout service=%s method=%s path=%s url=%s error_type=%s",
+            service,
+            request.method,
+            path,
+            url,
+            type(exc).__name__,
+        )
+        return JSONResponse(
+            {"status": "error", "detail": f"{service} timed out ({type(exc).__name__})"},
+            status_code=504,
+        )
+    except httpx.RequestError as exc:
+        logger.exception(
+            "Gateway upstream request failed service=%s method=%s path=%s url=%s error_type=%s",
+            service,
+            request.method,
+            path,
+            url,
+            type(exc).__name__,
+        )
+        return JSONResponse(
+            {"status": "error", "detail": f"{service} request failed: {type(exc).__name__}"},
+            status_code=502,
+        )
 
     try:
         content = response.json()
@@ -133,18 +182,24 @@ async def _proxy(service: str, path: str, request: Request):
 
     return JSONResponse(status_code=response.status_code, content=content)
 
+
 @app.api_route("/api/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def api_proxy(service: str, path: str, request: Request):
     return await _proxy(service, path, request)
 
+
 @app.post("/form-submit")
 async def form_submit(request: Request):
-    try:
-        form_data = await request.json()
-        await orchestrator.handle_form_submission(form_data)
-        return {"status": "success", "message": "Form submission processed successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await _proxy("form-service", "form-submit", request)
+
+
+@app.api_route("/{service_prefix}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def prefix_proxy(service_prefix: str, path: str, request: Request):
+    service_name = SERVICE_PREFIX_MAP.get(service_prefix)
+    if not service_name:
+        return JSONResponse({"error": f"unknown service prefix '{service_prefix}'"}, status_code=404)
+    return await _proxy(service_name, path, request)
+
 
 @app.get("/health")
 async def health():
@@ -159,6 +214,7 @@ async def health():
             }
         )
     return {"gateway": "ok", "services": status}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host=GATEWAY_HOST, port=GATEWAY_PORT, log_level=LOG_LEVEL)

@@ -10,4 +10,6 @@ class FormSubmitRequest(BaseModel):
 class FormSubmitResponse(BaseModel):
     status: str
     candidate_id: Optional[str] = None
+    response_id: Optional[int] = None
+    processing_status: Optional[str] = None
     detail: Optional[str] = None

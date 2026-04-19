@@ -5,6 +5,9 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from core.db import db
+from core.form_fields import get_field_value
+
 
 def _normalize_text(value: Any) -> str:
     if value is None:
@@ -30,9 +33,26 @@ class FeatureSet:
     honors_text: str
     essay_failure_text: str
     essay_beta_text: str
+    essay_llm_available: bool
+    essay_growth_mindset_score: float
+    essay_resilience_score: float
+    essay_motivation_clarity_score: float
+    essay_mission_alignment_score: float
+    essay_authenticity_confidence_score: float
+    pdf_available: bool
+    pdf_page_count: int
+    pdf_skill_count: int
+    pdf_contact_count: int
+    github_available: bool
+    github_public_repos: int
+    github_followers: int
+    github_profile_completeness: int
+    degradation_notes: list[str]
 
     @staticmethod
     def from_candidate_data(candidate_data: dict[str, Any]) -> FeatureSet:
+        candidate_profile = candidate_data.get("candidate_profile", {})
+        candidate_profile = candidate_profile if isinstance(candidate_profile, dict) else {}
         parser_context = candidate_data.get("parser_context", {})
         results = parser_context.get("results", {}) if isinstance(parser_context, dict) else {}
         video_task = results.get("video_task", {}) if isinstance(results, dict) else {}
@@ -44,6 +64,21 @@ class FeatureSet:
         mission_signal_count = 0
         q5_leadership_level = "none"
         question_coverage_ratio = 0.0
+        essay_llm_available = False
+        essay_growth_mindset_score = 0.0
+        essay_resilience_score = 0.0
+        essay_motivation_clarity_score = 0.0
+        essay_mission_alignment_score = 0.0
+        essay_authenticity_confidence_score = 0.0
+        pdf_available = False
+        pdf_page_count = 0
+        pdf_skill_count = 0
+        pdf_contact_count = 0
+        github_available = False
+        github_public_repos = 0
+        github_followers = 0
+        github_profile_completeness = 0
+        degradation_notes: list[str] = []
 
         if isinstance(video_task, dict) and str(video_task.get("status", "")).upper() == "SUCCESS":
             video_result = video_task.get("result", {})
@@ -71,8 +106,37 @@ class FeatureSet:
 
             transcript_available = bool(transcript.get("available", False)) if isinstance(transcript, dict) else False
             transcript_source = str(transcript.get("source", "none")) if isinstance(transcript, dict) else "none"
+        else:
+            video_profile = candidate_profile.get("video", {})
+            video_data = video_profile.get("data", {}) if isinstance(video_profile, dict) else {}
+            transcript = video_data.get("transcript", {}) if isinstance(video_data, dict) else {}
+            analysis = video_data.get("analysis", {}) if isinstance(video_data, dict) else {}
+            signals = analysis.get("signals", {}) if isinstance(analysis, dict) else {}
+            intrinsic = signals.get("intrinsic", {}) if isinstance(signals, dict) else {}
+            mission = signals.get("mission_alignment", {}) if isinstance(signals, dict) else {}
 
-        form_data = candidate_data.get("form_data", {})
+            intrinsic_signals = intrinsic.get("signals", {}) if isinstance(intrinsic, dict) else {}
+            mastery_mentions = len(intrinsic_signals.get("mastery_mentions", [])) if isinstance(intrinsic_signals, dict) else 0
+            autonomy_mentions = len(intrinsic_signals.get("autonomy_mentions", [])) if isinstance(intrinsic_signals, dict) else 0
+            mission_signal_count = int(mission.get("signal_count", 0)) if isinstance(mission, dict) else 0
+
+            coverage = analysis.get("question_coverage", []) if isinstance(analysis, dict) else []
+            if isinstance(coverage, list):
+                q5 = next((item for item in coverage if item.get("question_id") == "q5_leadership"), None)
+                if isinstance(q5, dict):
+                    q5_leadership_level = str(q5.get("coverage_level", "none")).lower()
+
+            try:
+                question_coverage_ratio = float(analysis.get("question_coverage_ratio", 0.0)) if isinstance(analysis, dict) else 0.0
+            except (TypeError, ValueError):
+                question_coverage_ratio = 0.0
+
+            transcript_available = bool(transcript.get("available", False)) if isinstance(transcript, dict) else False
+            transcript_source = str(transcript.get("source", "none")) if isinstance(transcript, dict) else "none"
+
+        form_data = candidate_profile.get("form", {}).get("raw", {}) if isinstance(candidate_profile.get("form"), dict) else {}
+        if not form_data:
+            form_data = candidate_data.get("form_data", {})
         form_data = form_data if isinstance(form_data, dict) else {}
 
         values_text = [_normalize_text(v) for v in form_data.values()]
@@ -91,20 +155,62 @@ class FeatureSet:
                 honors_chunks.append(val_l)
 
         essay_failure_text = _normalize_text(
-            form_data.get(
-                "Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)",
-                "",
-            )
+            get_field_value(form_data, "essay_failure")
             or candidate_data.get("essay_failure", "")
         )
         essay_beta_text = _normalize_text(
-            form_data.get(
-                'The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)',
-                "",
-            )
+            get_field_value(form_data, "essay_beta")
             or candidate_data.get("essay_beta", "")
             or candidate_data.get("essay", "")
         )
+
+        essay_profile = candidate_profile.get("essay", {})
+        essay_analysis = essay_profile.get("analysis", {}) if isinstance(essay_profile, dict) else {}
+        essay_scores = essay_analysis.get("scores", {}) if isinstance(essay_analysis, dict) else {}
+        essay_llm_available = bool(essay_profile.get("llm_parsed_ok")) and isinstance(essay_scores, dict)
+        if essay_llm_available:
+            try:
+                essay_growth_mindset_score = float(essay_scores.get("growth_mindset", 0.0) or 0.0)
+                essay_resilience_score = float(essay_scores.get("resilience", 0.0) or 0.0)
+                essay_motivation_clarity_score = float(essay_scores.get("motivation_clarity", 0.0) or 0.0)
+                essay_mission_alignment_score = float(essay_scores.get("mission_alignment", 0.0) or 0.0)
+                essay_authenticity_confidence_score = float(essay_scores.get("authenticity_confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                essay_llm_available = False
+
+        pdf_profile = candidate_profile.get("pdf", {})
+        pdf_data = pdf_profile.get("data", {}) if isinstance(pdf_profile, dict) else {}
+        if isinstance(pdf_data, dict) and str(pdf_profile.get("task_status", "")).upper() == "SUCCESS":
+            pdf_available = True
+            pdf_summary = pdf_data.get("pdf_summary", {}) if isinstance(pdf_data.get("pdf_summary"), dict) else {}
+            extracted_profile = pdf_data.get("extracted_profile", {}) if isinstance(pdf_data.get("extracted_profile"), dict) else {}
+            pdf_page_count = int(pdf_summary.get("page_count", 0) or 0)
+            pdf_skill_count = len(extracted_profile.get("skills", [])) if isinstance(extracted_profile.get("skills"), list) else 0
+            emails = extracted_profile.get("emails", []) if isinstance(extracted_profile.get("emails"), list) else []
+            phones = extracted_profile.get("phones", []) if isinstance(extracted_profile.get("phones"), list) else []
+            pdf_contact_count = len(emails) + len(phones)
+
+        github_profile = candidate_profile.get("github", {})
+        github_data = github_profile.get("data", {}) if isinstance(github_profile, dict) else {}
+        github_summary = github_data.get("profile_summary", {}) if isinstance(github_data, dict) else {}
+        if isinstance(github_summary, dict) and str(github_profile.get("task_status", "")).upper() == "SUCCESS":
+            github_available = True
+            github_public_repos = int(github_summary.get("public_repos", 0) or 0)
+            github_followers = int(github_summary.get("followers", 0) or 0)
+            github_profile_completeness = sum(
+                1
+                for key in ("has_bio", "has_blog", "has_company")
+                if bool(github_summary.get(key))
+            )
+
+        if not transcript_available:
+            degradation_notes.append("video_missing_or_unusable")
+        if not essay_llm_available:
+            degradation_notes.append("essay_llm_unavailable")
+        if not pdf_available:
+            degradation_notes.append("pdf_not_available")
+        if not github_available:
+            degradation_notes.append("github_not_available")
 
         return FeatureSet(
             transcript_available=transcript_available,
@@ -119,6 +225,21 @@ class FeatureSet:
             honors_text="\n".join(honors_chunks),
             essay_failure_text=essay_failure_text,
             essay_beta_text=essay_beta_text,
+            essay_llm_available=essay_llm_available,
+            essay_growth_mindset_score=max(0.0, min(10.0, essay_growth_mindset_score)),
+            essay_resilience_score=max(0.0, min(10.0, essay_resilience_score)),
+            essay_motivation_clarity_score=max(0.0, min(10.0, essay_motivation_clarity_score)),
+            essay_mission_alignment_score=max(0.0, min(10.0, essay_mission_alignment_score)),
+            essay_authenticity_confidence_score=max(0.0, min(10.0, essay_authenticity_confidence_score)),
+            pdf_available=pdf_available,
+            pdf_page_count=max(0, pdf_page_count),
+            pdf_skill_count=max(0, pdf_skill_count),
+            pdf_contact_count=max(0, pdf_contact_count),
+            github_available=github_available,
+            github_public_repos=max(0, github_public_repos),
+            github_followers=max(0, github_followers),
+            github_profile_completeness=max(0, github_profile_completeness),
+            degradation_notes=degradation_notes,
         )
 
 
@@ -127,6 +248,7 @@ class BlockAResult:
     duration_commitment_0_4: float
     vertical_progress_0_3: float
     achievements_0_3: float
+    portfolio_evidence_0_2: float
     total_0_10: float
 
 
@@ -134,6 +256,7 @@ class BlockAResult:
 class BlockBResult:
     reaction_to_failure_0_5: float
     challenge_orientation_0_5: float
+    llm_support_used: bool
     total_0_10: float
 
 
@@ -141,6 +264,7 @@ class BlockBResult:
 class BlockCResult:
     intrinsic_type_i_0_4: float
     mission_alignment_0_6: float
+    essay_drive_0_10: float
     total_0_10: float
     weighted_0_15: float
     source: str
@@ -207,11 +331,22 @@ def score_block_a(features: FeatureSet) -> BlockAResult:
     ]
     achievements = 3.0 if _contains_any(text, achievement_terms) > 0 else 0.0
 
-    total = min(10.0, duration_commitment + vertical_progress + achievements)
+    portfolio_evidence = 0.0
+    if features.pdf_available and (features.pdf_skill_count > 0 or features.pdf_page_count > 0):
+        portfolio_evidence += 1.0
+    if features.github_available and (
+        features.github_public_repos > 0
+        or features.github_followers > 0
+        or features.github_profile_completeness > 0
+    ):
+        portfolio_evidence += 1.0
+
+    total = min(10.0, duration_commitment + vertical_progress + achievements + portfolio_evidence)
     return BlockAResult(
         duration_commitment_0_4=duration_commitment,
         vertical_progress_0_3=vertical_progress,
         achievements_0_3=achievements,
+        portfolio_evidence_0_2=portfolio_evidence,
         total_0_10=total,
     )
 
@@ -246,10 +381,19 @@ def score_block_b(features: FeatureSet) -> BlockBResult:
         challenge_orientation = 0.0
     challenge_orientation = max(0.0, min(5.0, challenge_orientation - min(2.0, float(avoidance_hits))))
 
+    llm_support_used = False
+    if features.essay_llm_available:
+        llm_support_used = True
+        llm_reaction = min(5.0, features.essay_resilience_score / 2.0)
+        llm_challenge = min(5.0, features.essay_growth_mindset_score / 2.0)
+        reaction_to_failure = round((reaction_to_failure + llm_reaction) / 2.0, 2)
+        challenge_orientation = round((challenge_orientation + llm_challenge) / 2.0, 2)
+
     total = min(10.0, reaction_to_failure + challenge_orientation)
     return BlockBResult(
         reaction_to_failure_0_5=reaction_to_failure,
         challenge_orientation_0_5=challenge_orientation,
+        llm_support_used=llm_support_used,
         total_0_10=total,
     )
 
@@ -257,12 +401,35 @@ def score_block_b(features: FeatureSet) -> BlockBResult:
 def score_block_c(features: FeatureSet) -> BlockCResult:
     intrinsic_score = float(min(4, min(2, features.mastery_mentions) + min(2, features.autonomy_mentions)))
     mission_score = float(min(6, features.mission_signal_count))
-    raw_score = float(min(10, intrinsic_score + mission_score))
+    video_score = float(min(10, intrinsic_score + mission_score))
+    essay_drive = 0.0
+    if features.essay_llm_available:
+        essay_drive = round(
+            min(
+                10.0,
+                (features.essay_motivation_clarity_score + features.essay_mission_alignment_score) / 2.0,
+            ),
+            2,
+        )
+
+    if features.transcript_available and features.essay_llm_available:
+        raw_score = round((video_score * 0.65) + (essay_drive * 0.35), 2)
+        source = "video_plus_essay_llm"
+    elif features.transcript_available:
+        raw_score = video_score
+        source = "parser_signals"
+    elif features.essay_llm_available:
+        raw_score = essay_drive
+        source = "essay_llm_fallback"
+    else:
+        raw_score = 0.0
+        source = "fallback_no_video"
+
     weighted_score = round(raw_score * 1.5, 2)
-    source = "parser_signals" if features.transcript_available else "fallback_no_video"
     return BlockCResult(
         intrinsic_type_i_0_4=intrinsic_score,
         mission_alignment_0_6=mission_score,
+        essay_drive_0_10=essay_drive,
         total_0_10=raw_score,
         weighted_0_15=weighted_score,
         source=source,
@@ -316,15 +483,16 @@ def build_explainability(
     block_explanations = {
         "A": (
             f"A={block_a.total_0_10}/10: duration_commitment={block_a.duration_commitment_0_4}/4, "
-            f"vertical_progress={block_a.vertical_progress_0_3}/3, achievements={block_a.achievements_0_3}/3."
+            f"vertical_progress={block_a.vertical_progress_0_3}/3, achievements={block_a.achievements_0_3}/3, "
+            f"portfolio_evidence={block_a.portfolio_evidence_0_2}/2."
         ),
         "B": (
             f"B={block_b.total_0_10}/10: reaction_to_failure={block_b.reaction_to_failure_0_5}/5, "
-            f"challenge_orientation={block_b.challenge_orientation_0_5}/5."
+            f"challenge_orientation={block_b.challenge_orientation_0_5}/5, llm_support_used={block_b.llm_support_used}."
         ),
         "C": (
-            f"C={block_c.total_0_10}/10 from video signals: intrinsic={block_c.intrinsic_type_i_0_4}/4, "
-            f"mission_alignment={block_c.mission_alignment_0_6}/6, source={block_c.source}."
+            f"C={block_c.total_0_10}/10 from motivation evidence: intrinsic={block_c.intrinsic_type_i_0_4}/4, "
+            f"mission_alignment={block_c.mission_alignment_0_6}/6, essay_drive={block_c.essay_drive_0_10}/10, source={block_c.source}."
         ),
     }
 
@@ -356,6 +524,33 @@ def build_explainability(
     )
 
 
+def _parse_candidate_id(candidate_data: dict[str, Any]) -> int | None:
+    raw_candidate_id = candidate_data.get("candidate_id")
+    if raw_candidate_id is None:
+        return None
+
+    candidate_id_text = str(raw_candidate_id).strip()
+    if not candidate_id_text:
+        return None
+
+    try:
+        return int(candidate_id_text)
+    except ValueError as exc:
+        raise ValueError(f"Invalid candidate_id '{raw_candidate_id}'") from exc
+
+
+def _derive_ai_suspicion(features: FeatureSet) -> str:
+    if features.essay_llm_available and features.essay_authenticity_confidence_score <= 3.0:
+        return "high"
+    if not features.transcript_available and not features.essay_llm_available:
+        return "needs_review"
+    if features.question_coverage_ratio < 0.6 or (
+        features.essay_llm_available and features.essay_authenticity_confidence_score < 7.0
+    ):
+        return "medium"
+    return "low"
+
+
 class ScoringService:
     async def evaluate_candidate(self, candidate_data: dict) -> dict:
         await asyncio.sleep(0.2)
@@ -374,12 +569,21 @@ class ScoringService:
         motivation_score = block_c.total_0_10
         growth_score = block_b.total_0_10
         authenticity_score = 8.0 if features.transcript_available else 5.0
+        if features.essay_llm_available:
+            authenticity_score = round(
+                min(10.0, (authenticity_score + features.essay_authenticity_confidence_score) / 2.0),
+                2,
+            )
 
         red_flags: list[str] = []
         if block_c.total_0_10 == 0:
             red_flags.append("No strong motivation evidence in video signals")
         if block_b.total_0_10 <= 2:
             red_flags.append("Weak growth-mindset evidence in essays")
+        if not features.essay_llm_available:
+            red_flags.append("Essay LLM analysis unavailable, scoring used heuristic fallback")
+        if not features.transcript_available:
+            red_flags.append("Video transcript unavailable, motivation relied on fallback signals")
 
         green_flags: list[str] = []
         if block_a.total_0_10 >= 7:
@@ -388,8 +592,12 @@ class ScoringService:
             green_flags.append("Strong reflective learning and challenge orientation")
         if block_c.total_0_10 >= 7:
             green_flags.append("Strong intrinsic motivation and mission alignment")
+        if features.pdf_available:
+            green_flags.append("PDF evidence parsed successfully")
+        if features.github_available:
+            green_flags.append("GitHub evidence parsed successfully")
 
-        return {
+        result = {
             "scores": {
                 "leadership": leadership_score,
                 "experience": experience_score,
@@ -402,6 +610,7 @@ class ScoringService:
             "bucket": bucket,
             "weights": aggregation.weights,
             "context_multiplier": aggregation.context_multiplier,
+            "max_score": 10.0,
             "aggregation": asdict(aggregation),
             "block_breakdown": {
                 "A": asdict(block_a),
@@ -413,4 +622,35 @@ class ScoringService:
             "red_flags": red_flags,
             "green_flags": green_flags,
             "features": asdict(features),
+            "degradation_notes": list(features.degradation_notes),
         }
+
+        candidate_id = _parse_candidate_id(candidate_data)
+        if candidate_id is not None:
+            db.save_score(
+                user_id=candidate_id,
+                scores={
+                    "motivation": motivation_score,
+                    "experience": experience_score,
+                    "leadership": leadership_score,
+                    "growth": growth_score,
+                    "total": final_score,
+                },
+                explanation={
+                    "bucket": bucket,
+                    "summary": explainability.summary,
+                    "explainability": asdict(explainability),
+                    "block_breakdown": result["block_breakdown"],
+                    "red_flags": red_flags,
+                    "green_flags": green_flags,
+                    "weights": aggregation.weights,
+                    "context_multiplier": aggregation.context_multiplier,
+                    "degradation_notes": list(features.degradation_notes),
+                },
+                ai_suspicion=_derive_ai_suspicion(features),
+            )
+            result["persistence"] = {"saved": True, "user_id": candidate_id}
+        else:
+            result["persistence"] = {"saved": False, "user_id": None}
+
+        return result

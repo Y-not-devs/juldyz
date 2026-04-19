@@ -1,9 +1,10 @@
 import asyncio
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter, FastAPI, HTTPException
 
 from core.logger import setup_logging
 from core.config import SERVICES
+from core.network import normalize_bind_host
 
 from services.scoring.service import ScoringService
 setup_logging(SERVICES['scoring-service']['prefix'])
@@ -27,7 +28,7 @@ async def evaluate(candidate_data: dict):
         result = await scoring_service.evaluate_candidate(candidate_data)
         return {"status": "success", "data": result}
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 api.include_router(router)
 
@@ -36,13 +37,13 @@ async def main():
     cfg = SERVICES['scoring-service']
     config = uvicorn.Config(
         api,
-        host="127.0.0.1",
+        host=normalize_bind_host(str(cfg['url'])),
         port=cfg['port'],
         log_level=cfg['log_level']
     )
     server = uvicorn.Server(config)
 
-    print(f"[BOT] starting polling + api on :{cfg['port']}")
+    print(f"[SCORING] starting api on :{cfg['port']}")
     await asyncio.gather(
         server.serve()
     )
