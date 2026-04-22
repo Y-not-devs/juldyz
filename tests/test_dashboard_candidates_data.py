@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from services.dashboard.candidates_data import (
     build_table_rows,
@@ -47,7 +54,7 @@ class DashboardCandidatesDataTests(unittest.TestCase):
                 ai_suspicion="low",
             )
 
-            rows = fetch_candidates(temp_db.path, limit=10)
+            rows = fetch_candidates(limit=10, database=temp_db)
             self.assertEqual(len(rows), 1)
             row = rows[0]
             self.assertEqual(candidate_display_name(row), "Aruzhan Sapar")

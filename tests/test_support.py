@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import sys
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
@@ -8,6 +9,11 @@ from importlib import import_module
 from pathlib import Path
 from typing import Iterator
 from unittest.mock import patch
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from core.db import Database
 

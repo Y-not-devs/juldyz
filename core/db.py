@@ -420,11 +420,11 @@ class Database:
     ) -> None:
         if stage not in STAGE_COLUMN_MAP:
             raise ValueError(f"Unsupported stage: {stage}")
-        if status not in {"pending", "processing", "done", "failed", "skipped"}:
+        if status not in {"pending", "processing", "done", "failed", "skipped", "partial"}:
             raise ValueError(f"Unsupported stage status: {status}")
 
         status_column, error_column = STAGE_COLUMN_MAP[stage]
-        error_value = error if status == "failed" else None
+        error_value = error if status in {"failed", "partial"} else None
 
         with self._connect() as conn:
             conn.execute(
@@ -798,6 +798,69 @@ class Database:
                 "INSERT INTO audit_log (user_id, action, new_score) VALUES (?,?,?)",
                 (user_id, "auto_score", scores["total"])
             )
+
+    def get_candidate_dashboard_rows(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    u.id AS user_id,
+                    u.telegram_id,
+                    u.created_at,
+                    t.username,
+                    t.first_name AS tg_first_name,
+                    t.last_name AS tg_last_name,
+                    r.email,
+                    r.first_name AS form_first_name,
+                    r.last_name AS form_last_name,
+                    r.program_applied,
+                    r.major,
+                    r.personal_presentation,
+                    r.english_results,
+                    r.english_test_certificate,
+                    r.additional_documents,
+                    r.social_certificate,
+                    r.additional_info,
+                    r.processing_status,
+                    r.processing_error,
+                    r.processing_started_at,
+                    r.processed_at,
+                    r.parser_status,
+                    r.parser_error,
+                    r.scoring_status,
+                    r.scoring_error,
+                    r.notification_status,
+                    r.notification_error,
+                    r.raw_payload,
+                    s.total AS total_score,
+                    s.motivation,
+                    s.experience,
+                    s.leadership,
+                    s.growth,
+                    s.ai_suspicion,
+                    s.scored_at
+                FROM users u
+                LEFT JOIN telegram_users t
+                    ON t.telegram_id = u.telegram_id
+                LEFT JOIN candidate_responses r
+                    ON r.id = (
+                        SELECT cr.id
+                        FROM candidate_responses cr
+                        WHERE cr.user_id = u.id
+                        ORDER BY cr.id DESC
+                        LIMIT 1
+                    )
+                LEFT JOIN scores s
+                    ON s.user_id = u.id
+                ORDER BY
+                    CASE WHEN s.total IS NULL THEN 1 ELSE 0 END,
+                    s.total DESC,
+                    u.id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def manual_override(self, user_id: int, new_total: float, note: str, changed_by: str):
         with self._connect() as conn:

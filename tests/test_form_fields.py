@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from core.form_fields import get_field_value, normalize_form_payload
 

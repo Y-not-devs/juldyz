@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import re
-from typing import Any, Callable, Dict
-from fastapi import HTTPException
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
+
 import httpx
+
 from core.config import (
     HTTP_CONNECT_TIMEOUT_SECONDS,
     HTTP_POOL_TIMEOUT_SECONDS,
@@ -14,14 +16,22 @@ from core.config import (
     SERVICES,
 )
 from core.form_fields import FIELD_ALIASES, get_field_value, normalize_form_payload
+from core.logger import setup_logging
 from core.network import build_service_base_url
 
-from core.logger import setup_logging
 setup_logging("orchestrator")
 logger = logging.getLogger(__name__)
 
+StageCallback = Callable[[str, str, str | None], Any]
 
-def _summarize_payload(payload: Dict[str, Any], max_items: int = 8, max_length: int = 400) -> str:
+
+class ServiceError(Exception):
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _summarize_payload(payload: dict[str, Any], max_items: int = 8, max_length: int = 400) -> str:
     summary_parts: list[str] = []
     for key in list(payload.keys())[:max_items]:
         value = payload.get(key)
@@ -37,6 +47,13 @@ def _summarize_payload(payload: Dict[str, Any], max_items: int = 8, max_length: 
     return "; ".join(summary_parts)[:max_length]
 
 
+def json_safe_error(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    if isinstance(summary, dict):
+        return f"parser completed_with_errors: {summary}"
+    return str(payload)[:500]
+
+
 def _build_timeout(service_name: str) -> httpx.Timeout:
     read_timeout = float(ORCHESTRATOR_SERVICE_READ_TIMEOUT_SECONDS.get(service_name, 30.0))
     return httpx.Timeout(
@@ -45,6 +62,60 @@ def _build_timeout(service_name: str) -> httpx.Timeout:
         write=HTTP_WRITE_TIMEOUT_SECONDS,
         pool=HTTP_POOL_TIMEOUT_SECONDS,
     )
+
+
+async def _emit_stage(
+    callback: StageCallback | None,
+    stage: str,
+    status: str,
+    detail: str | None = None,
+) -> None:
+    if callback is None:
+        return
+
+    result = callback(stage, status, detail)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _run_stage(
+    stage: str,
+    callback: StageCallback | None,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
+    await _emit_stage(callback, stage, "processing", None)
+    try:
+        result = await operation()
+    except Exception as exc:
+        await _emit_stage(callback, stage, "failed", str(exc))
+        raise
+    await _emit_stage(callback, stage, "done", None)
+    return result
+
+
+async def _run_parser_stage(
+    callback: StageCallback | None,
+    operation: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    await _emit_stage(callback, "parser", "processing", None)
+    try:
+        parser_result = await operation()
+    except Exception as exc:
+        await _emit_stage(callback, "parser", "failed", str(exc))
+        raise
+
+    parser_status = str(parser_result.get("status", "")).lower()
+    if parser_status == "completed":
+        await _emit_stage(callback, "parser", "done", None)
+        return parser_result
+
+    if parser_status == "completed_with_errors":
+        await _emit_stage(callback, "parser", "partial", json_safe_error(parser_result))
+        return parser_result
+
+    detail = f"Parser service returned unsupported status: {parser_status or 'missing'}"
+    await _emit_stage(callback, "parser", "failed", detail)
+    raise ServiceError(detail)
 
 
 class Pipeline:
@@ -57,11 +128,12 @@ class Pipeline:
         self.service_name = service_name
         self.service_url = service_url
 
-    async def send_request(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def send_request(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Send an async HTTP request to the service."""
         request_url = f"{self.service_url}/{endpoint}"
         payload_summary = _summarize_payload(payload)
         timeout = _build_timeout(self.service_name)
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             try:
                 response = await client.post(request_url, json=payload)
@@ -76,37 +148,37 @@ class Pipeline:
                         request_url,
                         payload_summary,
                     )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Service {self.service_name}/{endpoint} returned invalid JSON: {type(exc).__name__}",
+                    raise ServiceError(
+                        f"Service {self.service_name}/{endpoint} returned invalid JSON: {type(exc).__name__}"
                     ) from exc
+
                 if not isinstance(body, dict):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Service {self.service_name}/{endpoint} returned invalid JSON payload",
+                    raise ServiceError(
+                        f"Service {self.service_name}/{endpoint} returned invalid JSON payload"
                     )
+
                 if str(body.get("status", "")).lower() == "error":
                     detail = body.get("detail") or body.get("error") or "unknown service error"
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Service {self.service_name}/{endpoint} failed: {detail}",
+                    raise ServiceError(
+                        f"Service {self.service_name}/{endpoint} failed: {detail}"
                     )
+
                 return body
-            except httpx.HTTPStatusError as e:
+            except httpx.HTTPStatusError as exc:
                 logger.exception(
                     "Upstream HTTP error service=%s endpoint=%s status=%s url=%s payload=%s",
                     self.service_name,
                     endpoint,
-                    e.response.status_code,
+                    exc.response.status_code,
                     request_url,
                     payload_summary,
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Service {self.service_name}/{endpoint} returned {e.response.status_code}: {e.response.text[:300]}",
-                )
-            except httpx.TimeoutException as e:
-                phase = type(e).__name__.replace("Timeout", "").lower() or "request"
+                raise ServiceError(
+                    f"Service {self.service_name}/{endpoint} returned "
+                    f"{exc.response.status_code}: {exc.response.text[:300]}"
+                ) from exc
+            except httpx.TimeoutException as exc:
+                phase = type(exc).__name__.replace("Timeout", "").lower() or "request"
                 logger.exception(
                     "Upstream timeout service=%s endpoint=%s phase=%s url=%s payload=%s",
                     self.service_name,
@@ -115,23 +187,21 @@ class Pipeline:
                     request_url,
                     payload_summary,
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Service {self.service_name}/{endpoint} timed out during {phase} phase",
-                ) from e
-            except httpx.RequestError as e:
+                raise ServiceError(
+                    f"Service {self.service_name}/{endpoint} timed out during {phase} phase"
+                ) from exc
+            except httpx.RequestError as exc:
                 logger.exception(
                     "Upstream request failed service=%s endpoint=%s error_type=%s url=%s payload=%s",
                     self.service_name,
                     endpoint,
-                    type(e).__name__,
+                    type(exc).__name__,
                     request_url,
                     payload_summary,
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Service {self.service_name}/{endpoint} request failed: {type(e).__name__}",
-                ) from e
+                raise ServiceError(
+                    f"Service {self.service_name}/{endpoint} request failed: {type(exc).__name__}"
+                ) from exc
 
 
 def _extract_urls(value: Any) -> list[str]:
@@ -209,6 +279,8 @@ def _build_candidate_profile(
     video_task = _normalize_parser_task(results.get("video_task"))
     pdf_task = _normalize_parser_task(results.get("file_task"))
     github_task = _normalize_parser_task(results.get("github_task"))
+    essay_task_result = essay_task.get("result")
+    essay_result = essay_task_result if isinstance(essay_task_result, dict) else {}
 
     return {
         "candidate_id": str(candidate_id),
@@ -225,8 +297,8 @@ def _build_candidate_profile(
             "text_failure": get_field_value(payload, "essay_failure"),
             "text_beta": get_field_value(payload, "essay_beta"),
             "task_status": essay_task["status"],
-            "analysis": (essay_task.get("result") or {}).get("analysis") if isinstance(essay_task.get("result"), dict) else None,
-            "llm_parsed_ok": bool((essay_task.get("result") or {}).get("llm_parsed_ok")) if isinstance(essay_task.get("result"), dict) else False,
+            "analysis": essay_result.get("analysis"),
+            "llm_parsed_ok": bool(essay_result.get("llm_parsed_ok")),
             "error": essay_task.get("error"),
         },
         "video": {
@@ -252,7 +324,7 @@ class CandidateWorkflow:
     Handles the candidate workflow triggered by form submission.
     """
 
-    def __init__(self, services: Dict[str, str]):
+    def __init__(self, services: dict[str, str]):
         self.services = services
         self.bot_pipeline = Pipeline("bot-service", services["bot"])
         self.scoring_pipeline = Pipeline("scoring-service", services["scoring"])
@@ -260,13 +332,17 @@ class CandidateWorkflow:
 
     async def process_form_submission(
         self,
-        form_data: Dict[str, Any],
-        stage_callback: Callable[[str, str, str | None], None] | None = None,
-    ):
+        form_data: dict[str, Any],
+        stage_callback: StageCallback | None = None,
+    ) -> dict[str, Any]:
         """
         Orchestrates the candidate workflow triggered by form submission.
         """
-        candidate_id = form_data.get("candidate_id")
+        raw_candidate_id = form_data.get("candidate_id")
+        candidate_id = str(raw_candidate_id).strip() if raw_candidate_id is not None else ""
+        if not candidate_id:
+            raise ValueError("candidate_id is required")
+
         tg_id = str(form_data.get("tg_id", "")).strip()
         payload = normalize_form_payload(form_data)
 
@@ -286,7 +362,7 @@ class CandidateWorkflow:
         github_url = _extract_github_url(payload)
         pdf_source = _extract_pdf_source(payload)
 
-        parser_payload: Dict[str, Any] = {"user_id": str(candidate_id)}
+        parser_payload: dict[str, Any] = {"user_id": candidate_id}
         if youtube_url:
             parser_payload["youtube_url"] = youtube_url
         if essay_text:
@@ -298,64 +374,48 @@ class CandidateWorkflow:
         if pdf_source.get("file_url"):
             parser_payload["file_url"] = pdf_source["file_url"]
 
-        parser_result: Dict[str, Any] = {}
+        parser_result: dict[str, Any] = {}
         if len(parser_payload) > 1:
-            if stage_callback:
-                stage_callback("parser", "processing", None)
-            parser_result = await self.parser_pipeline.send_request("parse", parser_payload)
-            parser_status = str(parser_result.get("status", "")).lower()
-            if stage_callback:
-                if parser_status == "completed":
-                    stage_callback("parser", "done", None)
-                else:
-                    stage_callback("parser", "failed", json_safe_error(parser_result))
-        elif stage_callback:
-            stage_callback("parser", "skipped", None)
+            async def _parse_candidate() -> dict[str, Any]:
+                return await self.parser_pipeline.send_request("parse", parser_payload)
+
+            parser_result = await _run_parser_stage(stage_callback, _parse_candidate)
+        else:
+            await _emit_stage(stage_callback, "parser", "skipped", None)
 
         candidate_profile = _build_candidate_profile(candidate_id, payload, parser_result)
 
-        scoring_payload: Dict[str, Any] = {
-            "candidate_id": str(candidate_id),
+        scoring_payload: dict[str, Any] = {
+            "candidate_id": candidate_id,
             "candidate_profile": candidate_profile,
         }
         if parser_result:
             scoring_payload["parser_context"] = parser_result
-        if payload:
-            scoring_payload["form_data"] = payload
 
-        if stage_callback:
-            stage_callback("scoring", "processing", None)
-        scoring_result = await self.scoring_pipeline.send_request("evaluate", scoring_payload)
-        scoring_data = scoring_result.get("data")
-        if not isinstance(scoring_data, dict):
-            if stage_callback:
-                stage_callback("scoring", "failed", "Scoring service returned invalid response body")
-            raise HTTPException(
-                status_code=500,
-                detail="Scoring service returned invalid response body",
-            )
-        persistence = scoring_data.get("persistence", {})
-        if candidate_id is not None and not bool(persistence.get("saved")):
-            if stage_callback:
-                stage_callback("scoring", "failed", f"Scoring result for candidate_id={candidate_id} was not persisted")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Scoring result for candidate_id={candidate_id} was not persisted",
-            )
-        if stage_callback:
-            stage_callback("scoring", "done", None)
+        async def _score_candidate() -> dict[str, Any]:
+            scoring_result = await self.scoring_pipeline.send_request("evaluate", scoring_payload)
+            scoring_data = scoring_result.get("data")
+            if not isinstance(scoring_data, dict):
+                raise ServiceError("Scoring service returned invalid response body")
+
+            persistence = scoring_data.get("persistence", {})
+            if not bool(persistence.get("saved")):
+                raise ServiceError(f"Scoring result for candidate_id={candidate_id} was not persisted")
+
+            return scoring_result
+
+        scoring_result = await _run_stage("scoring", stage_callback, _score_candidate)
 
         if tg_id:
-            if stage_callback:
-                stage_callback("notification", "processing", None)
-            await self.bot_pipeline.send_request(
-                "notify",
-                {"tg_id": tg_id, "candidate_id": str(candidate_id)},
-            )
-            if stage_callback:
-                stage_callback("notification", "done", None)
-        elif stage_callback:
-            stage_callback("notification", "skipped", None)
+            async def _send_notification() -> dict[str, Any]:
+                return await self.bot_pipeline.send_request(
+                    "notify",
+                    {"tg_id": tg_id, "candidate_id": candidate_id},
+                )
+
+            await _run_stage("notification", stage_callback, _send_notification)
+        else:
+            await _emit_stage(stage_callback, "notification", "skipped", None)
 
         return {
             "parser_result": parser_result,
@@ -369,28 +429,28 @@ class Orchestrator:
     Main orchestrator for handling workflows.
     """
 
-    def __init__(self, services_config: Dict[str, Any] | None = None):
+    def __init__(self, services_config: dict[str, Any] | None = None):
         cfg = services_config or SERVICES
-        self.workflow = CandidateWorkflow({
-            "bot": build_service_base_url(cfg["bot-service"]["url"], cfg["bot-service"]["port"]),
-            "scoring": build_service_base_url(cfg["scoring-service"]["url"], cfg["scoring-service"]["port"]),
-            "llm": build_service_base_url(cfg["llm-service"]["url"], cfg["llm-service"]["port"]),
-            "parser": build_service_base_url(cfg["parser-service"]["url"], cfg["parser-service"]["port"]),
-        })
+        self.workflow = CandidateWorkflow(
+            {
+                "bot": build_service_base_url(cfg["bot-service"]["url"], cfg["bot-service"]["port"]),
+                "scoring": build_service_base_url(
+                    cfg["scoring-service"]["url"],
+                    cfg["scoring-service"]["port"],
+                ),
+                "parser": build_service_base_url(
+                    cfg["parser-service"]["url"],
+                    cfg["parser-service"]["port"],
+                ),
+            }
+        )
 
     async def handle_form_submission(
         self,
-        form_data: Dict[str, Any],
-        stage_callback: Callable[[str, str, str | None], None] | None = None,
-    ):
+        form_data: dict[str, Any],
+        stage_callback: StageCallback | None = None,
+    ) -> dict[str, Any]:
         """
         Handle form submission and trigger the candidate workflow.
         """
         return await self.workflow.process_form_submission(form_data, stage_callback=stage_callback)
-
-
-def json_safe_error(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary") if isinstance(payload, dict) else None
-    if isinstance(summary, dict):
-        return f"parser completed_with_errors: {summary}"
-    return str(payload)[:500]

@@ -1,85 +1,14 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from pathlib import Path
 from typing import Any
 
-
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "juldyz.db"
-
-
-def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
+from core.db import Database, db
 
 
-def fetch_candidates(db_path: Path | str = DEFAULT_DB_PATH, limit: int = 50) -> list[dict[str, Any]]:
-    path = Path(db_path)
-    if not path.exists():
-        return []
-
-    query = """
-    SELECT
-        u.id AS user_id,
-        u.telegram_id,
-        u.created_at,
-        t.username,
-        t.first_name AS tg_first_name,
-        t.last_name AS tg_last_name,
-        r.email,
-        r.first_name AS form_first_name,
-        r.last_name AS form_last_name,
-        r.program_applied,
-        r.major,
-        r.personal_presentation,
-        r.english_results,
-        r.english_test_certificate,
-        r.additional_documents,
-        r.social_certificate,
-        r.additional_info,
-        r.processing_status,
-        r.processing_error,
-        r.processing_started_at,
-        r.processed_at,
-        r.parser_status,
-        r.parser_error,
-        r.scoring_status,
-        r.scoring_error,
-        r.notification_status,
-        r.notification_error,
-        r.raw_payload,
-        s.total AS total_score,
-        s.motivation,
-        s.experience,
-        s.leadership,
-        s.growth,
-        s.ai_suspicion,
-        s.scored_at
-    FROM users u
-    LEFT JOIN telegram_users t
-        ON t.telegram_id = u.telegram_id
-    LEFT JOIN candidate_responses r
-        ON r.id = (
-            SELECT cr.id
-            FROM candidate_responses cr
-            WHERE cr.user_id = u.id
-            ORDER BY cr.id DESC
-            LIMIT 1
-        )
-    LEFT JOIN scores s
-        ON s.user_id = u.id
-    ORDER BY
-        CASE WHEN s.total IS NULL THEN 1 ELSE 0 END,
-        s.total DESC,
-        u.id DESC
-    LIMIT ?
-    """
-
-    with connect(path) as conn:
-        rows = conn.execute(query, (int(limit),)).fetchall()
-    return [dict(row) for row in rows]
+def fetch_candidates(limit: int = 50, database: Database | None = None) -> list[dict[str, Any]]:
+    storage = database or db
+    return storage.get_candidate_dashboard_rows(limit=limit)
 
 
 def safe_json_load(raw: Any) -> Any:

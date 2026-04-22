@@ -1,13 +1,9 @@
-﻿from __future__ import annotations
-
-import json
-import sqlite3
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
 import streamlit as st
 
 from core.dashboard_config import ensure_session_settings, load_dashboard_settings
+from core.db import db
 from services.dashboard.candidates_data import (
     build_table_rows,
     candidate_display_name,
@@ -23,15 +19,10 @@ st.set_page_config(
 )
 
 ensure_session_settings(st.session_state, load_dashboard_settings())
-DB_PATH = Path(__file__).resolve().parents[3] / "data" / "juldyz.db"
 
 
 st.title("Candidates List")
-st.caption("Live data from SQLite (`data/juldyz.db`).")
-
-if not DB_PATH.exists():
-    st.error(f"Database not found: {DB_PATH}")
-    st.stop()
+st.caption("Live candidate data from the application storage layer.")
 
 with st.sidebar:
     st.subheader("Filters")
@@ -50,7 +41,7 @@ with st.sidebar:
     only_scored = st.checkbox("Only scored", value=False)
     min_score = st.slider("Min score", min_value=0.0, max_value=10.0, value=0.0, step=0.1)
 
-rows = fetch_candidates(DB_PATH, limit=page_size)
+rows = fetch_candidates(limit=page_size, database=db)
 if not rows:
     st.warning("No candidates found.")
     st.stop()
@@ -73,7 +64,11 @@ with metric2:
     st.metric("Scored", scored_count)
 with metric3:
     if scored_count:
-        avg_score = round(sum(float(row["total_score"]) for row in filtered if row.get("total_score") is not None) / scored_count, 2)
+        avg_score = round(
+            sum(float(row["total_score"]) for row in filtered if row.get("total_score") is not None)
+            / scored_count,
+            2,
+        )
         st.metric("Average Score", avg_score)
     else:
         st.metric("Average Score", "-")
@@ -149,4 +144,3 @@ if selected.get("notification_error"):
 
 with st.expander("Form Raw Payload", expanded=bool(st.session_state["show_raw_payloads"])):
     st.json(safe_json_load(selected.get("raw_payload")))
-

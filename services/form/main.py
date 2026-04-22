@@ -3,14 +3,14 @@ import json
 import logging
 from contextlib import asynccontextmanager
 import uvicorn
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core.config import FORM_WORKFLOW_MAX_CONCURRENT_JOBS, SERVICES
 from core.form_fields import normalize_form_payload
 from core.logger import setup_logging
 from core.network import normalize_bind_host
-from core.orchestrator import Orchestrator
+from core.orchestrator import Orchestrator, ServiceError
 from services.form.service import FormService
 from services.form.schemas.payload import FormSubmitRequest, FormSubmitResponse
 
@@ -135,6 +135,11 @@ async def lifespan(app: FastAPI):
 api = FastAPI(title=f"{SERVICES['form-service']['prefix']} API", lifespan=lifespan)
 router = APIRouter(tags=["form-service"])
 orchestrator = Orchestrator()
+
+
+@api.exception_handler(ServiceError)
+async def handle_service_error(request: Request, exc: ServiceError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": exc.detail})
 
 
 # --- Routes ---

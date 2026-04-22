@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from fastapi.testclient import TestClient
 
@@ -380,7 +387,7 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
             "file_url did not return a PDF document",
         )
         self.assertIn("candidate_profile", scoring_call)
-        self.assertIn(("parser", "failed"), stages)
+        self.assertIn(("parser", "partial"), stages)
         self.assertIn(("scoring", "processing"), stages)
         self.assertIn(("scoring", "done"), stages)
 

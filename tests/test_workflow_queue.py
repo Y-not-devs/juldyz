@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import gc
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_str = str(PROJECT_ROOT)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
 
 from core.db import Database
 
@@ -134,6 +140,23 @@ class WorkflowQueueTests(unittest.TestCase):
             saved_job = conn.execute("SELECT * FROM workflow_jobs WHERE id=?", (job_id,)).fetchone()
         self.assertEqual(saved_job["attempts"], 0)
         self.assertEqual(saved_job["status"], "queued")
+
+    def test_update_candidate_response_stage_accepts_partial_status(self) -> None:
+        response_id = self.db.save_candidate_response(
+            self.user_id,
+            {"Name": "Partial", "Surname": "Candidate"},
+        )
+
+        self.db.update_candidate_response_stage(
+            response_id,
+            "parser",
+            "partial",
+            "parser completed_with_errors: {'failure_count': 1}",
+        )
+
+        saved_response = self.db.get_candidate_response_by_id(response_id)
+        self.assertEqual(saved_response["parser_status"], "partial")
+        self.assertIn("completed_with_errors", saved_response["parser_error"])
 
 
 if __name__ == "__main__":

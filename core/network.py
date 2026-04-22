@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from urllib.parse import urlparse
-
 
 def normalize_bind_host(value: str) -> str:
     raw = str(value).strip()
@@ -9,7 +7,6 @@ def normalize_bind_host(value: str) -> str:
         parsed = urlparse(raw)
         return parsed.hostname or "127.0.0.1"
     return raw
-
 
 def build_service_base_url(value: str, port: int) -> str:
     raw = str(value).strip()
