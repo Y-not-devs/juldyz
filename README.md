@@ -1,78 +1,134 @@
-﻿# Juldyz: Интеллектуальная система поддержки отбора кандидатов в inVision U
+﻿# JULDYZ — EXPLAINABLE AI PLATFORM FOR CANDIDATE EVALUATION
 
-**Трек:** AI inDrive (Decentrathon 5.0)
-**Команда:** Revenant
+## OVERVIEW
 
----
+Juldyz is an explainable AI system designed to assist in evaluating candidates based on real growth signals, experience trajectory, and authenticity rather than purely formal application quality.
 
-## Наше решение
+The system aggregates multiple data sources and transforms them into a structured candidate profile that supports human decision-making.
 
-Главная проблема классического отбора заключается в том, что комиссия видит лишь "упаковку" заявки, а не самого человека. Настоящие таланты с огромным лидерским потенциалом легко могут потеряться на фоне формально идеальных эссе, сгенерированных нейросетями.
-
-Мы создали многомодальную data-driven систему, которая смещает фокус с текущих достижений на **траекторию роста** и реальный потенциал. Наша система собирает разрозненные кусочки "цифрового следа" кандидата (активность на GitHub, неформальный диалог с Telegram-ботом, классические эссе), анализирует их и помогает приёмной комиссии inVision U увидеть полную и объективную картину.
-
-Главный принцип Juldyz — **Human-in-the-loop (человек в контуре)**. Мы принципиально отказались от "черных ящиков", которые принимают решения вместо людей. Наш ИИ выступает исключительно как умный ассистент:
-
-- Берет на себя рутину по сведению десятков страниц текстов и ссылок в единый профиль.
-- Выявляет "красные флаги" (например, шаблонные ответы или следы ChatGPT).
-- Подсвечивает "зеленые флаги" (уникальные пет-проекты, инициативность, нестандартное мышление).
-- Предоставляет прозрачный скоринг, где **каждый балл имеет внятное текстовое обоснование (Explainable AI)**. Фаталити — финальное решение *всегда* принимает человек.
-
-### Ключевые возможности (Feature-лист)
-
-1. **Многомодальный парсинг (Parser Service):** Автоматический сбор и стандартизация данных из разных источников (GitHub-профили, PDF резюме/CV) с использованием LLM для извлечения неструктурированного опыта.
-2. **Умный скоринг (Scoring Service):** Оценка траектории роста и потенциала кандидата (Explainable AI — система всегда возвращает обоснование оценки).
-3. **Telegram-бот (Bot Service):** Альтернативный, более "живой" и интерактивный канал первичного сбора данных о кандидате.
-4. **Дашборд комиссии (Dashboard Service):** Удобный web-интерфейс на **Streamlit** для просмотра ранжированного шорт-листа с подсветкой ключевых сигналов потенциала (зеленые/красные флаги).
-5. **Детектирование ИИ (Anti-GPT):** Проверка текстов и анкет на предмет использования генеративного ИИ для оценки аутентичности кандидата.
+Juldyz does not replace human evaluators. It provides structured insights to reduce manual analysis effort.
 
 ---
 
-## Архитектура решения
+## CORE PRINCIPLES
 
-Решение построено на микросервисной архитектуре, что обеспечивает масштабируемость и независимую работу модулей:
+- Human-in-the-loop decision making
+- Explainable scoring for every evaluation
+- Multi-source data aggregation
+- Transparency over automation
 
-```bash
+---
+
+## SYSTEM ARCHITECTURE
+
 juldyz/
-├── core/              # Общие модули (БД, конфиги, логирование)
-├── scripts/           # Скрипты локального запуска (bash)
-├── services/
-│   ├── bot/           # Telegram-интерфейс для сбора мотивации и данных в формате диалога
-│   ├── dashboard/     # Web-интерфейс приёмной комиссии (Streamlit)
-│   ├── form/          # API обработки традиционных заявок
-│   ├── llm/           # Модуль для работы с LLM для парсинга и генерации объяснений
-│   ├── parser/        # Обработка внешних источников (GitHub API, LLM PDF CV Parser)
-│   └── scoring/       # FastAPI ядро: ранжирование кандидатов, генерация AI-объяснений (Explainability)
-└── data/              # Локальное хранилище артефактов (links, files, processed JSONs)
-```
+- core/        Shared modules (config, database, logging)
+- scripts/     Local execution scripts
+- services/
+    - bot/        Telegram-based candidate interaction service
+    - dashboard/  Streamlit web interface for reviewers
+    - form/       Candidate submission API
+    - llm/        LLM integration layer (experimental)
+    - parser/     External data extraction (GitHub, CV parsing)
+    - scoring/    Explainable scoring engine
+- data/        Local storage of processed artifacts
 
 ---
 
-## Как запустить локально (Demo)
+## IMPLEMENTED COMPONENTS
 
-Для демонстрации работы интеллектуальной системы отбора в локальной среде (запуск всех микросервисов):
+### PARSER SERVICE
+- GitHub API integration for profile extraction
+- Repository metadata collection
+- PDF CV parsing and structured extraction
+- Skills and contact information extraction
+- Validation and error handling
 
-1. **Активируйте виртуальное окружение и установите все зависимости:**
+### SCORING SERVICE
+- Weighted evaluation model:
+  Final Score = (A × 2.0 + B × 3.0 + C × 1.5) / 6.5
+- A: Experience signals
+- B: Motivation and leadership signals
+- C: Authenticity and growth indicators
+- Explainable output with textual justification
+- Candidate categorization into performance buckets
 
-   ```bash
-   # Под Windows (PowerShell)
-   & .\.venv\Scripts\Activate.ps1
-   
-   # Установка всех необходимых пакетов
+### DATABASE
+- SQLite-based persistence layer
+- Stores candidate submissions, parsed data, and scoring results
+
+### DASHBOARD
+- Candidate overview interface
+- Manual scoring configuration interface
+- Candidate list view from database
+- Grading criteria documentation
+
+---
+
+## INCOMPLETE / EXPERIMENTAL COMPONENTS
+
+### LLM SERVICE
+- Schema and structure defined
+- No production LLM backend integrated
+- No task execution system implemented
+
+### TELEGRAM BOT
+- Basic service structure exists
+- Not connected to scoring pipeline
+- No validated end-to-end workflow
+
+### YOUTUBE PARSER
+- Experimental implementation
+- Dependency-heavy transcription pipeline
+- Not integrated into scoring system
+
+### ANTI-AI DETECTION
+- Concept exists in database schema
+- No working detection logic implemented
+
+### ORCHESTRATION LAYER
+- Partial implementation in main entrypoint
+- Service lifecycle management incomplete
+- No fully verified inter-service communication
+
+---
+
+## SYSTEM STATUS
+
+Scoring Engine:          WORKING  
+GitHub/PDF Parser:       WORKING  
+Database:                WORKING  
+Dashboard:               PARTIAL  
+Telegram Bot:            INCOMPLETE
+LLM Integration:         NOT IMPLEMENTED  
+YouTube Analysis:        EXPERIMENTAL  
+Anti-AI Detection:       NOT IMPLEMENTED  
+End-to-End Pipeline:     INCOMPLETE  
+
+Current Stage: Pre-MVP
+
+---
+
+## LOCAL RUN INSTRUCTIONS
+
+1. Create virtual environment:
+   python -m venv .venv
+
+2. Activate environment:
+   source .venv/bin/activate   (Linux/Mac)
+   .\.venv\Scripts\activate    (Windows)
+
+3. Install dependencies:
    pip install -r requirements.txt
-   ```
 
-2. **Запустите единую точку входа (Main Gateway):**
-
-   ```bash
-   $env:PYTHONPATH="."
-   python main.py
-   ```
-
-   *Этот скрипт автоматически поднимет все необходимые микросервисы (Scoring, Parser, LLM, Dashboard) и свяжет их между собой.*
-
-В дашборде доступна система оценки кандидата по метрикам: Лидерство, Опыт (Hard Skills), Мотивация и Аутентичность, основанная на агрегации данных из формы, эссе и парсера.
+4. Run system:
+   PYTHONPATH=. python main.py
 
 ---
 
-### Created for Decentrathon 5.0
+## DESIGN GOALS
+
+- Maintain human control over final decisions
+- Avoid black-box scoring systems
+- Provide transparent evaluation reasoning
+- Keep modular and extensible architecture
