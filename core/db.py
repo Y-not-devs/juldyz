@@ -799,6 +799,27 @@ class Database:
                 (user_id, "auto_score", scores["total"])
             )
 
+    def get_recent_scoring_results(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    user_id AS candidate_id,
+                    total AS total_score,
+                    motivation,
+                    experience,
+                    leadership,
+                    growth,
+                    ai_suspicion,
+                    scored_at
+                FROM scores
+                ORDER BY scored_at DESC, user_id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_candidate_dashboard_rows(self, limit: int = 50) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(

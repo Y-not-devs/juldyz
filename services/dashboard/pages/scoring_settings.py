@@ -4,10 +4,10 @@ import json
 
 import httpx
 import streamlit as st
-import sqlite3
 
 from core.config import DASHBOARD_REQUEST_TIMEOUT_SECONDS
 from core.dashboard_config import ensure_session_settings, load_dashboard_settings
+from core.db import db
 
 st.set_page_config(
     page_title="Scoring Settings",
@@ -96,12 +96,6 @@ def _build_payload(
         "essay_beta": essay_beta,
         "parser_context": parser_context,
     }
-
-
-def _connect():
-    """Connect to the SQLite database."""
-    return sqlite3.connect("data/candidates.db")
-
 
 if "last_scoring_result" not in st.session_state:
     st.session_state["last_scoring_result"] = {}
@@ -248,17 +242,8 @@ if st.session_state["last_scoring_result"]:
 # Add scoring results display section
 st.title("Scoring Results")
 
-# Fetch scoring results from the database
 def fetch_scoring_results():
-    query = """
-    SELECT candidate_id, total_score, motivation, experience, leadership, growth, ai_suspicion, scored_at
-    FROM scoring_results
-    ORDER BY scored_at DESC
-    LIMIT 50
-    """
-    with _connect() as conn:
-        rows = conn.execute(query).fetchall()
-    return [dict(row) for row in rows]
+    return db.get_recent_scoring_results(limit=50)
 
 # Display scoring results
 results = fetch_scoring_results()
