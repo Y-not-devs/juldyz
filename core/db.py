@@ -2,8 +2,53 @@ import sqlite3
 import json
 from pathlib import Path
 
+from core.form_fields import get_field_value, normalize_form_payload
+
 DB_PATH = Path(__file__).parent.parent / "data" / "juldyz.db"
 DB_PATH.parent.mkdir(exist_ok=True)
+
+STAGE_COLUMN_MAP: dict[str, tuple[str, str]] = {
+    "parser": ("parser_status", "parser_error"),
+    "scoring": ("scoring_status", "scoring_error"),
+    "notification": ("notification_status", "notification_error"),
+}
+
+CANDIDATE_RESPONSE_REQUIRED_COLUMNS: dict[str, str] = {
+    "user_id": "INTEGER NOT NULL REFERENCES users(id)",
+    "timestamp": "TEXT DEFAULT (datetime('now'))",
+    "email": "TEXT",
+    "last_name": "TEXT",
+    "first_name": "TEXT",
+    "patronymic": "TEXT",
+    "dob": "TEXT",
+    "mobile_phone": "TEXT",
+    "instagram": "TEXT",
+    "telegram_handle": "TEXT",
+    "whatsapp": "TEXT",
+    "program_applied": "TEXT",
+    "major": "TEXT",
+    "personal_presentation": "TEXT",
+    "english_results": "TEXT",
+    "english_test_certificate": "TEXT DEFAULT ''",
+    "additional_documents": "TEXT DEFAULT ''",
+    "essay_failure": "TEXT",
+    "essay_beta": "TEXT",
+    "honors_raw": "TEXT DEFAULT '[]'",
+    "activities_raw": "TEXT DEFAULT '[]'",
+    "social_certificate": "TEXT DEFAULT ''",
+    "additional_info": "TEXT DEFAULT '{}'",
+    "processing_status": "TEXT DEFAULT 'pending'",
+    "processing_error": "TEXT",
+    "processing_started_at": "TEXT",
+    "processed_at": "TEXT",
+    "parser_status": "TEXT DEFAULT 'pending'",
+    "parser_error": "TEXT",
+    "scoring_status": "TEXT DEFAULT 'pending'",
+    "scoring_error": "TEXT",
+    "notification_status": "TEXT DEFAULT 'pending'",
+    "notification_error": "TEXT",
+    "raw_payload": "TEXT DEFAULT '{}'",
+}
 
 
 class Database:
@@ -114,7 +159,45 @@ class Database:
                 changed_by    TEXT DEFAULT 'system',
                 created_at    TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS workflow_jobs (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                response_id   INTEGER NOT NULL UNIQUE REFERENCES candidate_responses(id),
+                user_id       INTEGER NOT NULL REFERENCES users(id),
+                payload_json  TEXT NOT NULL,
+                status        TEXT DEFAULT 'queued',
+                current_stage TEXT DEFAULT 'queued',
+                attempts      INTEGER DEFAULT 0,
+                max_attempts  INTEGER DEFAULT 3,
+                last_error    TEXT,
+                available_at  TEXT DEFAULT (datetime('now')),
+                locked_at     TEXT,
+                completed_at  TEXT,
+                created_at    TEXT DEFAULT (datetime('now')),
+                updated_at    TEXT DEFAULT (datetime('now'))
+            );
             """)
+            self._ensure_candidate_response_columns(conn)
+
+    def _ensure_candidate_response_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = self._table_columns(conn, "candidate_responses")
+        for column_name, column_sql in CANDIDATE_RESPONSE_REQUIRED_COLUMNS.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE candidate_responses ADD COLUMN {column_name} {column_sql}"
+                )
+
+    def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {str(row["name"]) for row in rows}
+
+    def _payload_first(self, payload: dict, *keys: str, default=None):
+        for key in keys:
+            if key in payload:
+                value = payload.get(key)
+                if value is not None and str(value).strip() != "":
+                    return value
+        return default
 
     # --- users ---
     def upsert_user(self, telegram_id: str) -> int:
@@ -133,6 +216,14 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE telegram_id=?", (telegram_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_candidate_id(self, candidate_id: str | int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE id=?",
+                (int(candidate_id),),
             ).fetchone()
         return dict(row) if row else None
 
@@ -165,55 +256,186 @@ class Database:
 
     # --- candidate_responses ---
     def save_candidate_response(self, user_id: int, payload: dict) -> int:
-        honors = {k: payload.get(k, "") for k in [
-            "Honors 1 title", "Honors 2 title", "Honors 3 title",
-            "Honors 4 title", "Honors 5 title", "Grade level",
-            "Level(s) of recognition", "Do you have other honors?"
-        ]}
-        activities = {k: payload.get(k, "") for k in [
-            "Activity type",
-            "Position/Leadership description\n(Max characters: 50)",
-            "Organization Name\n(Max characters: 50)",
-            "Please describe this activity, including what you accomplished and any recognition you received, etc.\n(Max characters: 150)"
-        ]}
+        payload = normalize_form_payload(payload)
+        honors = {
+            "Honors 1 title": payload.get("Honors 1 title", ""),
+            "Honors 2 title": payload.get("Honors 2 title", ""),
+            "Honors 3 title": payload.get("Honors 3 title", ""),
+            "Honors 4 title": payload.get("Honors 4 title", ""),
+            "Honors 5 title": payload.get("Honors 5 title", ""),
+            "Grade level": payload.get("Grade level", ""),
+            "Level(s) of recognition": self._payload_first(
+                payload,
+                "Level(s) of recognition",
+                "Level of recognition",
+            )
+            or "",
+            "Do you have other honors?": payload.get("Do you have other honors?", ""),
+        }
+        activities = {
+            "Activity type": payload.get("Activity type", ""),
+            "Position/Leadership description": self._payload_first(
+                payload,
+                "Position/Leadership description\n(Max characters: 50)",
+                "Position/Leadership description (Max characters: 50)",
+            )
+            or "",
+            "Organization Name": self._payload_first(
+                payload,
+                "Organization Name\n(Max characters: 50)",
+                "Organization Name (Max characters: 50)",
+            )
+            or "",
+            "Activity description": self._payload_first(
+                payload,
+                "Please describe this activity, including what you accomplished and any recognition you received, etc.\n(Max characters: 120)",
+                "Please describe this activity, including what you accomplished and any recognition you received, etc.\n(Max characters: 150)",
+                "Please describe this activity, including what you accomplished and any recognition you received, etc. (Max characters: 120)",
+                "Please describe this activity, including what you accomplished and any recognition you received, etc. (Max characters: 150)",
+            )
+            or "",
+        }
+
+        additional_info = {
+            "mobile_phone": get_field_value(payload, "mobile_phone"),
+            "instagram": get_field_value(payload, "instagram"),
+            "telegram_handle": get_field_value(payload, "telegram_handle"),
+            "whatsapp": get_field_value(payload, "whatsapp"),
+            "english_test_certificate": get_field_value(payload, "english_test_certificate"),
+            "additional_documents": get_field_value(payload, "additional_documents"),
+            "essay_failure": get_field_value(payload, "essay_failure"),
+            "essay_beta": get_field_value(payload, "essay_beta"),
+            "honors_raw": honors,
+            "activities_raw": activities,
+        }
+
+        mapped = {
+            "user_id": user_id,
+            "timestamp": payload.get("timestamp"),
+            "email": get_field_value(payload, "email"),
+            "last_name": get_field_value(payload, "last_name"),
+            "first_name": get_field_value(payload, "first_name"),
+            "patronymic": get_field_value(payload, "patronymic"),
+            "dob": get_field_value(payload, "dob"),
+            "mobile_phone": get_field_value(payload, "mobile_phone"),
+            "instagram": get_field_value(payload, "instagram"),
+            "telegram_handle": get_field_value(payload, "telegram_handle"),
+            "whatsapp": get_field_value(payload, "whatsapp"),
+            "program_applied": get_field_value(payload, "program_applied"),
+            "major": get_field_value(payload, "major"),
+            "personal_presentation": get_field_value(payload, "personal_presentation"),
+            "english_results": get_field_value(payload, "english_results"),
+            "english_test_certificate": get_field_value(payload, "english_test_certificate") or "",
+            "additional_documents": get_field_value(payload, "additional_documents") or "",
+            "essay_failure": get_field_value(payload, "essay_failure"),
+            "essay_beta": get_field_value(payload, "essay_beta"),
+            "honors_raw": json.dumps(honors, ensure_ascii=False),
+            "activities_raw": json.dumps(activities, ensure_ascii=False),
+            "social_certificate": get_field_value(payload, "honor_certificate") or "",
+            "additional_info": json.dumps(additional_info, ensure_ascii=False),
+            "processing_status": "pending",
+            "processing_error": None,
+            "processing_started_at": None,
+            "processed_at": None,
+            "parser_status": "pending",
+            "parser_error": None,
+            "scoring_status": "pending",
+            "scoring_error": None,
+            "notification_status": "pending",
+            "notification_error": None,
+            "raw_payload": json.dumps(payload, ensure_ascii=False),
+        }
 
         with self._connect() as conn:
-            cur = conn.execute("""
-                INSERT INTO candidate_responses (
-                    user_id, email, last_name, first_name, patronymic, dob,
-                    mobile_phone, instagram, telegram_handle, whatsapp,
-                    program_applied, major, personal_presentation, english_results,
-                    essay_failure, essay_beta,
-                    honors_raw, activities_raw, raw_payload
-                ) VALUES (
-                    :user_id, :email, :last_name, :first_name, :patronymic, :dob,
-                    :mobile_phone, :instagram, :telegram_handle, :whatsapp,
-                    :program_applied, :major, :personal_presentation, :english_results,
-                    :essay_failure, :essay_beta,
-                    :honors_raw, :activities_raw, :raw_payload
+            columns = self._table_columns(conn, "candidate_responses")
+            missing_columns = sorted(
+                key for key in CANDIDATE_RESPONSE_REQUIRED_COLUMNS if key not in columns
+            )
+            if missing_columns:
+                raise sqlite3.OperationalError(
+                    "candidate_responses schema is missing columns: "
+                    + ", ".join(missing_columns)
                 )
-            """, {
-                "user_id":               user_id,
-                "email":                 payload.get("Email Address") or payload.get("email"),
-                "last_name":             payload.get("Last Name"),
-                "first_name":            payload.get("First Name"),
-                "patronymic":            payload.get("Patronymic"),
-                "dob":                   payload.get("Date of Birth"),
-                "mobile_phone":          payload.get("Mobile phone number"),
-                "instagram":             payload.get("Instagram"),
-                "telegram_handle":       payload.get("Telegram"),
-                "whatsapp":              payload.get("WhatsApp"),
-                "program_applied":       payload.get("  Which program are you applying for?  "),
-                "major":                 payload.get("Please specify your intended major:  "),
-                "personal_presentation": payload.get("Personal Presentation (Foundation)") or payload.get("Personal Presentation (Undergraduate)"),
-                "english_results":       payload.get("English proficiency results (Foundation)") or payload.get("English proficiency results (Undergraduate)"),
-                "essay_failure":         payload.get("Reflect on a situation where your efforts or plan significantly failed. How exactly did you analyze what happened, and what new strategy did you choose to move forward? (Max characters: 100)"),
-                "essay_beta":            payload.get('The concept of "perpetual beta" means a constant readiness to update your knowledge and admit mistakes. Describe a skill, idea, or project of yours that is currently in "perpetual beta." How exactly are you challenging yourself to improve it? (Max characters: 100)'),
-                "honors_raw":            json.dumps(honors, ensure_ascii=False),
-                "activities_raw":        json.dumps(activities, ensure_ascii=False),
-                "raw_payload":           json.dumps(payload, ensure_ascii=False),
-            })
+            insert_data = {key: value for key, value in mapped.items() if key in columns}
+
+            column_names = ", ".join(insert_data.keys())
+            value_names = ", ".join(f":{key}" for key in insert_data.keys())
+            query = f"INSERT INTO candidate_responses ({column_names}) VALUES ({value_names})"
+            cur = conn.execute(query, insert_data)
             return cur.lastrowid
+
+    def update_candidate_response_processing(
+        self,
+        response_id: int,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        if status not in {"pending", "processing", "done", "failed"}:
+            raise ValueError(f"Unsupported processing status: {status}")
+
+        if status == "processing":
+            started_at = "datetime('now')"
+        elif status == "pending":
+            started_at = "NULL"
+        else:
+            started_at = "processing_started_at"
+        processed_at = "datetime('now')" if status in {"done", "failed"} else "NULL"
+        error_value = error if status == "failed" else None
+
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                UPDATE candidate_responses
+                SET processing_status=?,
+                    processing_error=?,
+                    processing_started_at={started_at},
+                    processed_at={processed_at}
+                WHERE id=?
+                """,
+                (status, error_value, int(response_id)),
+            )
+
+    def reset_candidate_response_stages(self, response_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE candidate_responses
+                SET parser_status='pending',
+                    parser_error=NULL,
+                    scoring_status='pending',
+                    scoring_error=NULL,
+                    notification_status='pending',
+                    notification_error=NULL
+                WHERE id=?
+                """,
+                (int(response_id),),
+            )
+
+    def update_candidate_response_stage(
+        self,
+        response_id: int,
+        stage: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        if stage not in STAGE_COLUMN_MAP:
+            raise ValueError(f"Unsupported stage: {stage}")
+        if status not in {"pending", "processing", "done", "failed", "skipped", "partial"}:
+            raise ValueError(f"Unsupported stage status: {status}")
+
+        status_column, error_column = STAGE_COLUMN_MAP[stage]
+        error_value = error if status in {"failed", "partial"} else None
+
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                UPDATE candidate_responses
+                SET {status_column}=?,
+                    {error_column}=?
+                WHERE id=?
+                """,
+                (status, error_value, int(response_id)),
+            )
 
     def get_candidate_response(self, user_id: int) -> dict | None:
         with self._connect() as conn:
@@ -223,6 +445,278 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_candidate_response_by_id(self, response_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM candidate_responses WHERE id=?",
+                (int(response_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def enqueue_workflow_job(
+        self,
+        response_id: int,
+        user_id: int,
+        payload: dict,
+        max_attempts: int = 3,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO workflow_jobs (response_id, user_id, payload_json, max_attempts)
+                VALUES (?,?,?,?)
+                ON CONFLICT(response_id) DO UPDATE SET
+                    user_id=excluded.user_id,
+                    payload_json=excluded.payload_json,
+                    max_attempts=excluded.max_attempts,
+                    status='queued',
+                    current_stage='queued',
+                    attempts=0,
+                    last_error=NULL,
+                    available_at=datetime('now'),
+                    locked_at=NULL,
+                    completed_at=NULL,
+                    updated_at=datetime('now')
+                """,
+                (int(response_id), int(user_id), json.dumps(payload, ensure_ascii=False), int(max_attempts)),
+            )
+            if cur.lastrowid:
+                return int(cur.lastrowid)
+            row = conn.execute(
+                "SELECT id FROM workflow_jobs WHERE response_id=?",
+                (int(response_id),),
+            ).fetchone()
+            if not row:
+                raise sqlite3.OperationalError("Failed to resolve workflow job id")
+            return int(row["id"])
+
+    def recover_stale_workflow_jobs(self, timeout_seconds: int = 900) -> int:
+        timeout_seconds = max(1, int(timeout_seconds))
+        stale_modifier = f"-{timeout_seconds} seconds"
+        recovered = 0
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, response_id, attempts, max_attempts, current_stage
+                FROM workflow_jobs
+                WHERE status='processing'
+                  AND locked_at IS NOT NULL
+                  AND datetime(locked_at) <= datetime('now', ?)
+                """,
+                (stale_modifier,),
+            ).fetchall()
+
+            for row in rows:
+                recovered += 1
+                job_id = int(row["id"])
+                attempts = int(row["attempts"])
+                max_attempts = int(row["max_attempts"])
+                response_id = int(row["response_id"]) if row["response_id"] is not None else None
+                current_stage = str(row["current_stage"] or "").strip()
+                stage_mapping = STAGE_COLUMN_MAP.get(current_stage)
+                dead_letter_error = "workflow job timed out and exceeded max attempts"
+                retry_error = "workflow job timed out and was re-queued"
+
+                if attempts >= max_attempts:
+                    conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='dead_letter',
+                            current_stage='dead_letter',
+                            last_error=COALESCE(last_error, ?),
+                            updated_at=datetime('now'),
+                            completed_at=datetime('now')
+                        WHERE id=?
+                        """,
+                        (dead_letter_error, job_id),
+                    )
+                    if response_id is not None:
+                        if stage_mapping:
+                            status_column, error_column = stage_mapping
+                            conn.execute(
+                                f"""
+                                UPDATE candidate_responses
+                                SET processing_status='failed',
+                                    processing_error=?,
+                                    processed_at=datetime('now'),
+                                    {status_column}='failed',
+                                    {error_column}=?
+                                WHERE id=?
+                                """,
+                                (dead_letter_error, dead_letter_error, response_id),
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                UPDATE candidate_responses
+                                SET processing_status='failed',
+                                    processing_error=?,
+                                    processed_at=datetime('now')
+                                WHERE id=?
+                                """,
+                                (dead_letter_error, response_id),
+                            )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='retry',
+                            current_stage='queued',
+                            last_error=COALESCE(last_error, ?),
+                            available_at=datetime('now'),
+                            locked_at=NULL,
+                            updated_at=datetime('now')
+                        WHERE id=?
+                        """,
+                        (retry_error, job_id),
+                    )
+                    if response_id is not None:
+                        if stage_mapping:
+                            status_column, error_column = stage_mapping
+                            conn.execute(
+                                f"""
+                                UPDATE candidate_responses
+                                SET processing_status='pending',
+                                    processing_error=NULL,
+                                    processing_started_at=NULL,
+                                    processed_at=NULL,
+                                    {status_column}='failed',
+                                    {error_column}=?
+                                WHERE id=?
+                                """,
+                                (retry_error, response_id),
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                UPDATE candidate_responses
+                                SET processing_status='pending',
+                                    processing_error=NULL,
+                                    processing_started_at=NULL,
+                                    processed_at=NULL
+                                WHERE id=?
+                                """,
+                                (response_id,),
+                            )
+        return recovered
+
+    def claim_next_workflow_job(self) -> dict | None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT *
+                FROM workflow_jobs
+                WHERE status IN ('queued', 'retry')
+                  AND datetime(COALESCE(available_at, datetime('now'))) <= datetime('now')
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if not row:
+                conn.commit()
+                return None
+
+            attempts = int(row["attempts"]) + 1
+            conn.execute(
+                """
+                UPDATE workflow_jobs
+                SET status='processing',
+                    current_stage='workflow',
+                    attempts=?,
+                    locked_at=datetime('now'),
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (attempts, int(row["id"])),
+            )
+            updated = conn.execute(
+                "SELECT * FROM workflow_jobs WHERE id=?",
+                (int(row["id"]),),
+            ).fetchone()
+            conn.commit()
+        return dict(updated) if updated else None
+
+    def update_workflow_job_stage(self, job_id: int, stage: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_jobs
+                SET current_stage=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (stage, int(job_id)),
+            )
+
+    def get_workflow_job(self, job_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_jobs WHERE id=?",
+                (int(job_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def complete_workflow_job(self, job_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_jobs
+                SET status='completed',
+                    current_stage='completed',
+                    locked_at=NULL,
+                    completed_at=datetime('now'),
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (int(job_id),),
+            )
+
+    def fail_workflow_job(
+        self,
+        job_id: int,
+        error: str,
+        retry_delay_seconds: int = 30,
+    ) -> dict:
+        retry_delay_seconds = max(1, int(retry_delay_seconds))
+        delay_modifier = f"+{retry_delay_seconds} seconds"
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_jobs WHERE id=?",
+                (int(job_id),),
+            ).fetchone()
+            if not row:
+                raise sqlite3.OperationalError(f"Workflow job {job_id} not found")
+
+            attempts = int(row["attempts"])
+            max_attempts = int(row["max_attempts"])
+            final_status = "dead_letter" if attempts >= max_attempts else "retry"
+            next_stage = "dead_letter" if final_status == "dead_letter" else "queued"
+            completed_clause = "datetime('now')" if final_status == "dead_letter" else "NULL"
+            available_clause = "NULL" if final_status == "dead_letter" else f"datetime('now', '{delay_modifier}')"
+
+            conn.execute(
+                f"""
+                UPDATE workflow_jobs
+                SET status=?,
+                    current_stage=?,
+                    last_error=?,
+                    locked_at=NULL,
+                    available_at={available_clause},
+                    completed_at={completed_clause},
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (final_status, next_stage, str(error)[:2000], int(job_id)),
+            )
+            updated = conn.execute(
+                "SELECT * FROM workflow_jobs WHERE id=?",
+                (int(job_id),),
+            ).fetchone()
+        return dict(updated) if updated else {}
+
     # --- user_files ---
     def save_file(self, user_id: int, file_id: str, file_type: str) -> int:
         with self._connect() as conn:
@@ -231,6 +725,20 @@ class Database:
                 (user_id, file_id, file_type)
             )
             return cur.lastrowid
+
+    def ensure_file(self, user_id: int, file_id: str, file_type: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM user_files WHERE user_id=? AND file_id=? LIMIT 1",
+                (int(user_id), str(file_id)),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+            cur = conn.execute(
+                "INSERT INTO user_files (user_id, file_id, file_type) VALUES (?,?,?)",
+                (int(user_id), str(file_id), str(file_type)),
+            )
+            return int(cur.lastrowid)
 
     def get_files(self, user_id: int) -> list[dict]:
         with self._connect() as conn:
@@ -290,6 +798,90 @@ class Database:
                 "INSERT INTO audit_log (user_id, action, new_score) VALUES (?,?,?)",
                 (user_id, "auto_score", scores["total"])
             )
+
+    def get_recent_scoring_results(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    user_id AS candidate_id,
+                    total AS total_score,
+                    motivation,
+                    experience,
+                    leadership,
+                    growth,
+                    ai_suspicion,
+                    scored_at
+                FROM scores
+                ORDER BY scored_at DESC, user_id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_candidate_dashboard_rows(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    u.id AS user_id,
+                    u.telegram_id,
+                    u.created_at,
+                    t.username,
+                    t.first_name AS tg_first_name,
+                    t.last_name AS tg_last_name,
+                    r.email,
+                    r.first_name AS form_first_name,
+                    r.last_name AS form_last_name,
+                    r.program_applied,
+                    r.major,
+                    r.personal_presentation,
+                    r.english_results,
+                    r.english_test_certificate,
+                    r.additional_documents,
+                    r.social_certificate,
+                    r.additional_info,
+                    r.processing_status,
+                    r.processing_error,
+                    r.processing_started_at,
+                    r.processed_at,
+                    r.parser_status,
+                    r.parser_error,
+                    r.scoring_status,
+                    r.scoring_error,
+                    r.notification_status,
+                    r.notification_error,
+                    r.raw_payload,
+                    s.total AS total_score,
+                    s.motivation,
+                    s.experience,
+                    s.leadership,
+                    s.growth,
+                    s.ai_suspicion,
+                    s.scored_at
+                FROM users u
+                LEFT JOIN telegram_users t
+                    ON t.telegram_id = u.telegram_id
+                LEFT JOIN candidate_responses r
+                    ON r.id = (
+                        SELECT cr.id
+                        FROM candidate_responses cr
+                        WHERE cr.user_id = u.id
+                        ORDER BY cr.id DESC
+                        LIMIT 1
+                    )
+                LEFT JOIN scores s
+                    ON s.user_id = u.id
+                ORDER BY
+                    CASE WHEN s.total IS NULL THEN 1 ELSE 0 END,
+                    s.total DESC,
+                    u.id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def manual_override(self, user_id: int, new_total: float, note: str, changed_by: str):
         with self._connect() as conn:

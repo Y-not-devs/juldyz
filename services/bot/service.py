@@ -43,6 +43,16 @@ class BotService:
             chat_id=int(tg_id),
             text="✅ Анкета получена! Мы свяжемся с тобой."
         )
+    
+    async def send_message(self, candidate_id: str, text: str):
+        user = db.get_user_by_candidate_id(candidate_id)
+        if user and user.get("telegram_id"):
+            await self.bot.send_message(
+                chat_id=int(user["telegram_id"]),
+                text=text
+            )
+        else:
+            print(f"[BOT] No Telegram ID found for candidate_id={candidate_id}")
 
     async def start_polling(self):
         await self.dp.start_polling(self.bot, handle_signals=False)

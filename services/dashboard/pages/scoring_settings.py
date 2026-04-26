@@ -5,7 +5,9 @@ import json
 import httpx
 import streamlit as st
 
+from core.config import DASHBOARD_REQUEST_TIMEOUT_SECONDS
 from core.dashboard_config import ensure_session_settings, load_dashboard_settings
+from core.db import db
 
 st.set_page_config(
     page_title="Scoring Settings",
@@ -19,7 +21,7 @@ ensure_session_settings(st.session_state, load_dashboard_settings())
 def call_evaluate(base_url: str, prefix: str, payload: dict) -> tuple[bool, dict | str]:
     url = f"{base_url.rstrip('/')}/{prefix.strip('/')}/evaluate"
     try:
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=DASHBOARD_REQUEST_TIMEOUT_SECONDS["scoring"]) as client:
             resp = client.post(url, json=payload)
         if resp.status_code >= 400:
             try:
@@ -94,7 +96,6 @@ def _build_payload(
         "essay_beta": essay_beta,
         "parser_context": parser_context,
     }
-
 
 if "last_scoring_result" not in st.session_state:
     st.session_state["last_scoring_result"] = {}
@@ -237,4 +238,26 @@ if st.session_state["last_scoring_result"]:
         st.json(breakdown)
     with st.expander("Raw Response", expanded=bool(st.session_state["show_raw_payloads"])):
         st.json(full)
+
+# Add scoring results display section
+st.title("Scoring Results")
+
+def fetch_scoring_results():
+    return db.get_recent_scoring_results(limit=50)
+
+# Display scoring results
+results = fetch_scoring_results()
+if results:
+    for result in results:
+        st.subheader(f"Candidate ID: {result['candidate_id']}")
+        st.write(f"Total Score: {result['total_score']}")
+        st.write(f"Motivation: {result['motivation']}")
+        st.write(f"Experience: {result['experience']}")
+        st.write(f"Leadership: {result['leadership']}")
+        st.write(f"Growth: {result['growth']}")
+        st.write(f"AI Suspicion: {result['ai_suspicion']}")
+        st.write(f"Scored At: {result['scored_at']}")
+        st.write("---")
+else:
+    st.warning("No scoring results found.")
 

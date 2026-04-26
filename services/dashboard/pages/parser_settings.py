@@ -3,6 +3,7 @@
 import httpx
 import streamlit as st
 
+from core.config import DASHBOARD_REQUEST_TIMEOUT_SECONDS
 from core.dashboard_config import ensure_session_settings, load_dashboard_settings
 
 st.set_page_config(
@@ -17,7 +18,7 @@ ensure_session_settings(st.session_state, load_dashboard_settings())
 def call_parser(base_url: str, prefix: str, payload: dict) -> tuple[bool, dict | str]:
     url = f"{base_url.rstrip('/')}/{prefix.strip('/')}/parse"
     try:
-        with httpx.Client(timeout=45.0) as client:
+        with httpx.Client(timeout=DASHBOARD_REQUEST_TIMEOUT_SECONDS["parser"]) as client:
             resp = client.post(url, json=payload)
         if resp.status_code >= 400:
             try:

@@ -1,13 +1,23 @@
-from .form.main import router as form_router
-from .bot.main import router as bot_router
-from .llm.main import router as llm_router
-from .parser.main import router as parser_router
-from .scoring.main import router as scoring_router
-from .dashboard.main import router as dashboard_router
+from __future__ import annotations
+
+from importlib import import_module
 
 
-# This file makes the "services" directory a Python package
-# and allows for better imports of services.
+_ROUTER_MODULES = {
+    "form_router": "services.form.main",
+    "bot_router": "services.bot.main",
+    "llm_router": "services.llm.main",
+    "parser_router": "services.parser.main",
+    "scoring_router": "services.scoring.main",
+    "dashboard_router": "services.dashboard.main",
+}
+
+__all__ = list(_ROUTER_MODULES)
 
 
-__all__ = ["form_router", "bot_router", "llm_router", "parser_router", "scoring_router", "dashboard_router"]
+def __getattr__(name: str):
+    module_name = _ROUTER_MODULES.get(name)
+    if not module_name:
+        raise AttributeError(f"module 'services' has no attribute '{name}'")
+    module = import_module(module_name)
+    return getattr(module, "router")

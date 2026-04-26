@@ -11,6 +11,7 @@ from fastapi import APIRouter, FastAPI
 
 from core.config import SERVICES
 from core.logger import setup_logging
+from core.network import normalize_bind_host
 
 setup_logging("dashboard")
 
@@ -65,10 +66,9 @@ api.include_router(router)
 
 async def main():
     cfg = SERVICES["dashboard-service"]
-    host = cfg["url"].replace("http://", "").replace("https://", "")
     config = uvicorn.Config(
         api,
-        host=host,
+        host=normalize_bind_host(str(cfg["url"])),
         port=cfg["port"],
         log_level=cfg["log_level"],
     )

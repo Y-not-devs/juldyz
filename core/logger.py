@@ -15,7 +15,6 @@ def setup_logging(service_name: str = "juldyz"):
     root.setLevel(logging.INFO)
     root.handlers = [handler]
 
-    # silence noisy libs
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
